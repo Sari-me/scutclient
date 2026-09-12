@@ -7,20 +7,18 @@ on:
     branches:
       - master
     paths:
-      - "Makefile"
       - "CMakeLists.txt"
       - "src/**"
-      - "openwrt/files/**"
+      - "openwrt/**"
       - ".github/workflows/openwrt-ipk.yml"
 
   pull_request:
     branches:
       - master
     paths:
-      - "Makefile"
       - "CMakeLists.txt"
       - "src/**"
-      - "openwrt/files/**"
+      - "openwrt/**"
       - ".github/workflows/openwrt-ipk.yml"
 
 permissions:
@@ -51,42 +49,52 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Prepare local OpenWrt feed
+      - name: Verify OpenWrt package layout
         shell: bash
         run: |
           set -euxo pipefail
-
-          rm -rf .ci-feed
-          mkdir -p .ci-feed/scutclient
-
-          rsync -a \
-            --exclude ".git/" \
-            --exclude ".github/" \
-            --exclude ".ci-feed/" \
-            ./ .ci-feed/scutclient/
-
-          echo "===== feed tree ====="
-          find .ci-feed/scutclient -maxdepth 4 -type f | sort
+          test -f openwrt/Makefile
+          test -f openwrt/files/scutclient.config
+          test -f openwrt/files/scutclient.init
+          test -f openwrt/files/scutclient.hotplug
+          test -f CMakeLists.txt
+          test -d src
+          grep -q '^PKG_NAME:=scutclient$' openwrt/Makefile
 
       - name: Build scutclient
         uses: openwrt/gh-action-sdk@main
         env:
           ARCH: ${{ matrix.arch }}-22.03.7
-          FEED_DIR: ${{ github.workspace }}/.ci-feed
+          FEED_DIR: ${{ github.workspace }}
           FEEDNAME: scutclient_ci
           PACKAGES: scutclient
+          BUILD_LOG: 1
+          # This workflow is for producing IPKs. Disable the action's optional
+          # in-place shfmt gate so shell formatting cannot block compilation.
+          NO_SHFMT_CHECK: 1
           V: s
+
+      - name: Show build logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          echo "===== available build logs ====="
+          find logs -type f -print 2>/dev/null || true
+          echo "===== compile log tails ====="
+          while IFS= read -r log; do
+            echo "----- $log -----"
+            tail -n 200 "$log" || true
+          done < <(find logs -type f -name 'compile.txt' -print 2>/dev/null || true)
 
       - name: Show generated packages
         if: always()
         shell: bash
         run: |
-          find bin -type f \( -name "*.ipk" -o -name "*.apk" \) -print || true
+          find bin -type f \( -name "*.ipk" -o -name "*.apk" \) -print 2>/dev/null || true
 
       - name: Upload IPK
         uses: actions/upload-artifact@v7
         with:
           name: scutclient-${{ matrix.arch }}-22.03.7
-          path: |
-            bin/packages/**/scutclient_ci/*.ipk
+          path: bin/packages/**/scutclient_ci/scutclient_*.ipk
           if-no-files-found: error
