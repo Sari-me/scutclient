@@ -4,114 +4,217 @@ START=99
 STOP=15
 USE_PROCD=1
 
-SCUTCLIENT_PATH=/usr/bin/scutclient
-SCUTCLIENT_CONFIG=scutclient
+PROG="/usr/bin/scutclient"
+CONFIG="scutclient"
 
 EXTRA_COMMANDS="logoff"
-EXTRA_HELP=<<EOF
-	logoff	Log off manually
-EOF
+EXTRA_HELP="
+	logoff	Send EAPOL logoff using configured interface
+"
 
-scutclient_validate_drcom() {
-	uci_validate_section scutclient drcom "${1}" \
-		'dns:ip4addr:222.201.130.30' \
-		'hostname:string:Lenovo-PC' \
-		'server_auth_ip:ip4addr:202.38.210.131' \
-		'version:string:4472434f4d0096022a' \
-		'onlinehook:string' \
-		'offlinehook:string' \
-		'nettime:string' \
-		'hash:string:2ec15ad258aee9604b18f2f8114da38db16efd00' || exit 1
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+SC_ENABLE=0
+SC_DEBUG=0
+
+SC_DNS="222.201.130.30"
+SC_HOSTNAME="Lenovo-PC"
+SC_SERVER_AUTH_IP="202.38.210.131"
+SC_VERSION="4472434f4d0096022a"
+SC_HASH="2ec15ad258aee9604b18f2f8114da38db16efd00"
+SC_ONLINEHOOK=""
+SC_OFFLINEHOOK=""
+SC_NETTIME=""
+
+scutclient_reset_globals() {
+	SC_ENABLE=0
+	SC_DEBUG=0
+
+	SC_DNS="222.201.130.30"
+	SC_HOSTNAME="Lenovo-PC"
+	SC_SERVER_AUTH_IP="202.38.210.131"
+	SC_VERSION="4472434f4d0096022a"
+	SC_HASH="2ec15ad258aee9604b18f2f8114da38db16efd00"
+	SC_ONLINEHOOK=""
+	SC_OFFLINEHOOK=""
+	SC_NETTIME=""
 }
 
-scutclient_validate_scutclient() {
-	uci_validate_section scutclient scutclient "${1}" \
-		'username:string' \
-		'password:string' \
-		'interface:string:wan' || exit 1
+scutclient_load_option() {
+	local section="$1"
+
+	config_get_bool SC_ENABLE "$section" enable 0
+	config_get_bool SC_DEBUG "$section" debug 0
 }
 
-scutclient_validate_option() {
-	uci_validate_section scutclient option "${1}" \
-		'enable:bool:0' \
-		'debug:bool:0' || exit 1
+scutclient_load_drcom() {
+	local section="$1"
+
+	config_get SC_DNS "$section" dns "222.201.130.30"
+	config_get SC_HOSTNAME "$section" hostname "Lenovo-PC"
+	config_get SC_SERVER_AUTH_IP "$section" server_auth_ip "202.38.210.131"
+	config_get SC_VERSION "$section" version "4472434f4d0096022a"
+	config_get SC_HASH "$section" hash "2ec15ad258aee9604b18f2f8114da38db16efd00"
+	config_get SC_ONLINEHOOK "$section" onlinehook ""
+	config_get SC_OFFLINEHOOK "$section" offlinehook ""
+	config_get SC_NETTIME "$section" nettime ""
 }
 
-scutclient_load_config() {
-	config_load scutclient
-	config_foreach scutclient_validate_option option
-	config_foreach scutclient_validate_drcom drcom
+scutclient_resolve_device() {
+	local configured="$1"
+	local device=""
+
+	[ -n "$configured" ] || configured="wan"
+
+	# 允许高级用户直接填写真实 Linux netdev。
+	if [ -e "/sys/class/net/$configured" ]; then
+		printf '%s\n' "$configured"
+		return 0
+	fi
+
+	# 推荐情况：UCI 中保存 logical interface，例如 wan。
+	network_get_device device "$configured" >/dev/null 2>&1
+
+	if [ -z "$device" ] && command -v network_get_physdev >/dev/null 2>&1; then
+		network_get_physdev device "$configured" >/dev/null 2>&1
+	fi
+
+	[ -n "$device" ] || return 1
+
+	printf '%s\n' "$device"
+	return 0
 }
 
 scutclient_start_instance() {
-	local cfg="$1"
-	local username password interface device ifname
-	scutclient_validate_scutclient "$cfg"
-	uci_validate_section network interface "$interface" 'ifname:string' 'device:string'
-	[ -z "$device" ] || ifname=$device
-	procd_open_instance "scutclient_${cfg}_${interface}"
-	procd_set_param stdout 1
-	procd_set_param stderr 1
-	procd_set_param netdev $ifname
-	procd_set_param command "$SCUTCLIENT_PATH"
-	procd_append_param command --username "$username" \
+	local section="$1"
+	local username=""
+	local password=""
+	local interface="wan"
+	local ifname=""
+
+	config_get username "$section" username ""
+	config_get password "$section" password ""
+	config_get interface "$section" interface "wan"
+
+	if [ -z "$username" ]; then
+		logger -t scutclient "Skip $section: username is empty"
+		return 1
+	fi
+
+	if [ -z "$password" ]; then
+		logger -t scutclient "Skip $section: password is empty"
+		return 1
+	fi
+
+	ifname="$(scutclient_resolve_device "$interface")"
+
+	if [ -z "$ifname" ]; then
+		logger -t scutclient \
+			"Skip $section: unable to resolve network interface '$interface'"
+		return 1
+	fi
+
+	logger -t scutclient \
+		"Starting $section on logical interface '$interface' ($ifname)"
+
+	procd_open_instance "$section"
+
+	procd_set_param command "$PROG"
+
+	procd_append_param command \
+		--username "$username" \
 		--password "$password" \
 		--iface "$ifname" \
-		--dns "$dns" \
-		--hostname "$hostname" \
-		--udp-server "$server_auth_ip" \
-		--cli-version "$version" \
-		--hash "$hash"
-	[ "$debug" -ge 1 ] && procd_append_param command --debug
-	[ -n "$onlinehook" ] && procd_append_param command --online-hook "$onlinehook"
-	[ -n "$offlinehook" ] && procd_append_param command --offline-hook "$offlinehook"
-	[ -n "$nettime" ] && procd_append_param command --net-time "$nettime"
+		--dns "$SC_DNS" \
+		--hostname "$SC_HOSTNAME" \
+		--udp-server "$SC_SERVER_AUTH_IP" \
+		--cli-version "$SC_VERSION" \
+		--hash "$SC_HASH"
+
+	[ "$SC_DEBUG" -eq 1 ] && \
+		procd_append_param command --debug
+
+	[ -n "$SC_ONLINEHOOK" ] && \
+		procd_append_param command --online-hook "$SC_ONLINEHOOK"
+
+	[ -n "$SC_OFFLINEHOOK" ] && \
+		procd_append_param command --offline-hook "$SC_OFFLINEHOOK"
+
+	[ -n "$SC_NETTIME" ] && \
+		procd_append_param command --net-time "$SC_NETTIME"
+
+	procd_set_param netdev "$ifname"
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+
 	procd_close_instance
 }
 
-scutclient_add_triggers() {
-	local cfg="$1"
-	local username password interface
-	scutclient_validate_scutclient "$cfg"
-	procd_add_interface_trigger "interface.*" $interface /etc/init.d/scutclient restart
-}
-
-scutclient_logoff() {
-	local cfg="$1"
-	local username password interface ifname
-	scutclient_validate_scutclient "$cfg"
-	uci_validate_section network interface "$interface" 'ifname:string'
-	$SCUTCLIENT_PATH --iface $ifname --logoff
-}
-
-service_triggers() {
-	local enable debug
-	config_load scutclient
-	config_foreach scutclient_validate_option option
-	config_foreach scutclient_add_triggers scutclient
-	#wan force_link is enabled by default when configured as static IP, which won't trigger hotplug events.
-	#Add wan6 and dhcp here as a backup.
-	procd_add_interface_trigger "interface.*" wan6 /etc/init.d/scutclient restart
-	procd_add_reload_trigger "dhcp"
-	procd_add_reload_trigger "$SCUTCLIENT_CONFIG"
-	procd_open_validate
-	scutclient_validate_option
-	scutclient_validate_scutclient
-	scutclient_validate_drcom
-	procd_close_validate
-}
-
 start_service() {
-	local dns hostname server_auth_ip version hash username password enable debug ifname authexe nettime
-	scutclient_load_config
-	[ $enable -eq 0 ] && exit
+	scutclient_reset_globals
+
+	config_load "$CONFIG"
+	config_foreach scutclient_load_option option
+	config_foreach scutclient_load_drcom drcom
+
+	[ "$SC_ENABLE" -eq 1 ] || {
+		logger -t scutclient "Service disabled by UCI"
+		return 0
+	}
+
 	config_foreach scutclient_start_instance scutclient
 }
 
-reload_service() {
-	restart
+scutclient_add_interface_trigger() {
+	local section="$1"
+	local interface="wan"
+
+	config_get interface "$section" interface "wan"
+
+	# logical network interface 才注册 netifd trigger。
+	# 如果用户直接填写 Linux netdev，则 procd netdev 已经负责监听设备。
+	if [ ! -e "/sys/class/net/$interface" ]; then
+		procd_add_interface_trigger \
+			"interface.*" \
+			"$interface" \
+			/etc/init.d/scutclient restart
+	fi
 }
 
-boot() {
-	return
+service_triggers() {
+	config_load "$CONFIG"
+
+	config_foreach scutclient_add_interface_trigger scutclient
+
+	procd_add_reload_trigger "$CONFIG"
+	procd_add_reload_trigger network
+}
+
+reload_service() {
+	stop
+	start
+}
+
+scutclient_logoff_instance() {
+	local section="$1"
+	local interface="wan"
+	local ifname=""
+
+	config_get interface "$section" interface "wan"
+
+	ifname="$(scutclient_resolve_device "$interface")"
+
+	if [ -z "$ifname" ]; then
+		logger -t scutclient \
+			"Unable to log off: cannot resolve '$interface'"
+		return 1
+	fi
+
+	"$PROG" --iface "$ifname" --logoff
+}
+
+logoff() {
+	config_load "$CONFIG"
+	config_foreach scutclient_logoff_instance scutclient
 }

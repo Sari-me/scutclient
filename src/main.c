@@ -52,7 +52,7 @@ void handle_term(int signal) {
 int main(int argc, char *argv[]) {
 	LogWrite(ALL, INF, "scutclient built at: " __DATE__ " " __TIME__);
 	LogWrite(ALL, INF, "Authored by Scutclient Project");
-	LogWrite(ALL, INF, "Source code available at https://github.com/scutclient/scutclient");
+	LogWrite(ALL, INF, "Source code available at https://github.com/Sari-me/scutclient");
 	LogWrite(ALL, INF, "Contact us with QQ group 262939451");
 	LogWrite(ALL, INF, "#######################################");
 	int client = 1;

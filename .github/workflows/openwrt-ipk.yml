@@ -1,0 +1,92 @@
+name: Build OpenWrt scutclient IPK
+
+on:
+  workflow_dispatch:
+
+  push:
+    branches:
+      - master
+    paths:
+      - "Makefile"
+      - "CMakeLists.txt"
+      - "src/**"
+      - "openwrt/files/**"
+      - ".github/workflows/openwrt-ipk.yml"
+
+  pull_request:
+    branches:
+      - master
+    paths:
+      - "Makefile"
+      - "CMakeLists.txt"
+      - "src/**"
+      - "openwrt/files/**"
+      - ".github/workflows/openwrt-ipk.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.arch }} / OpenWrt 22.03.7
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - x86_64
+          - aarch64_generic
+          - aarch64_cortex-a53
+          - arm_cortex-a7_neon-vfpv4
+          - mipsel_24kc
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Prepare local OpenWrt feed
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          rm -rf .ci-feed
+          mkdir -p .ci-feed/scutclient
+
+          rsync -a \
+            --exclude ".git/" \
+            --exclude ".github/" \
+            --exclude ".ci-feed/" \
+            ./ .ci-feed/scutclient/
+
+          echo "===== feed tree ====="
+          find .ci-feed/scutclient -maxdepth 4 -type f | sort
+
+      - name: Build scutclient
+        uses: openwrt/gh-action-sdk@main
+        env:
+          ARCH: ${{ matrix.arch }}-22.03.7
+          FEED_DIR: ${{ github.workspace }}/.ci-feed
+          FEEDNAME: scutclient_ci
+          PACKAGES: scutclient
+          V: s
+
+      - name: Show generated packages
+        if: always()
+        shell: bash
+        run: |
+          find bin -type f \( -name "*.ipk" -o -name "*.apk" \) -print || true
+
+      - name: Upload IPK
+        uses: actions/upload-artifact@v7
+        with:
+          name: scutclient-${{ matrix.arch }}-22.03.7
+          path: |
+            bin/packages/**/scutclient_ci/*.ipk
+          if-no-files-found: error

@@ -28,20 +28,6 @@ tar -Jxvf openwrt-sdk-ar71xx-generic_gcc-5.5.0_musl.Linux-x86_64.tar.xz
 cd openwrt-sdk-ar71xx-generic_gcc-5.5.0_musl.Linux-x86_64
 ```
 
-#### Using OpenWrt source code
-Nothing to do here.
-
-### Creating your package
-Create a directory called scutclient inside your package directory and copy openwrt/Makefile into it. (Of course this can be done using GUI file manager :D )
-```bash
-mkdir package/scutclient
-cp {SCUTCLIENT_SRC_DIR}/openwrt/Makefile package/scutclient
-```
-Then you've created a package for the latest stable version.
-
-If you want to compile other version you need to edit the **openwrt/Makefile** and change variable SRCDIR (at line 12) to your source code directory. 
-
-
 ### Compiling
 #### Using SDK
 
