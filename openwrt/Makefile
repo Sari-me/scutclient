@@ -14,12 +14,9 @@ PKG_RELEASE:=2
 PKG_MAINTAINER:=Scutclient Project
 PKG_LICENSE:=AGPL-3.0
 PKG_LICENSE_FILES:=COPYING
+
 PKG_BUILD_PARALLEL:=1
 
-# GitHub Actions uses this repository itself as an OpenWrt feed.  The package
-# Makefile lives in openwrt/, while the actual project source lives one level
-# above it.  Copy the current checkout into PKG_BUILD_DIR so the generated IPK
-# always contains the code from the commit being tested.
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 
 include $(INCLUDE_DIR)/package.mk
@@ -29,40 +26,59 @@ define Package/scutclient
   SECTION:=net
   CATEGORY:=Network
   TITLE:=SCUT Dr.com client
-  URL:=https://github.com/scutclient/scutclient
+  URL:=https://github.com/Sari-me/scutclient
 endef
 
 define Package/scutclient/description
- Support SCUT private authentication protocol.
+ SCUT Dr.com/802.1X network authentication client.
 endef
 
 define Package/scutclient/conffiles
 /etc/config/scutclient
 endef
 
-# Build the source code from the current GitHub checkout instead of downloading
-# the old upstream v3.1.3 tag.  In gh-action-sdk, the repository is mounted at
-# /feed and this package is discovered from /feed/openwrt/Makefile.
+#
+# The GitHub Actions workflow constructs:
+#
+#   .ci-feed/scutclient/
+#     Makefile
+#     CMakeLists.txt
+#     COPYING
+#     src/
+#     files/
+#
+# gh-action-sdk mounts .ci-feed as /feed, therefore all bundled source
+# files are available directly below $(CURDIR).
+#
 define Build/Prepare
 	rm -rf $(PKG_BUILD_DIR)
 	$(INSTALL_DIR) $(PKG_BUILD_DIR)
-	$(CP) $(CURDIR)/../CMakeLists.txt $(PKG_BUILD_DIR)/
-	$(CP) $(CURDIR)/../src $(PKG_BUILD_DIR)/
-	$(CP) $(CURDIR)/../COPYING $(PKG_BUILD_DIR)/
+
+	$(CP) $(CURDIR)/CMakeLists.txt $(PKG_BUILD_DIR)/
+	$(CP) $(CURDIR)/COPYING $(PKG_BUILD_DIR)/
+	$(CP) $(CURDIR)/src $(PKG_BUILD_DIR)/
 endef
 
 define Package/scutclient/install
 	$(INSTALL_DIR) $(1)/etc/config
-	$(INSTALL_DATA) $(CURDIR)/files/scutclient.config $(1)/etc/config/scutclient
+	$(INSTALL_DATA) \
+		$(CURDIR)/files/scutclient.config \
+		$(1)/etc/config/scutclient
 
 	$(INSTALL_DIR) $(1)/etc/init.d
-	$(INSTALL_BIN) $(CURDIR)/files/scutclient.init $(1)/etc/init.d/scutclient
+	$(INSTALL_BIN) \
+		$(CURDIR)/files/scutclient.init \
+		$(1)/etc/init.d/scutclient
 
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/iface
-	$(INSTALL_BIN) $(CURDIR)/files/scutclient.hotplug $(1)/etc/hotplug.d/iface/99-scutclient
+	$(INSTALL_BIN) \
+		$(CURDIR)/files/scutclient.hotplug \
+		$(1)/etc/hotplug.d/iface/99-scutclient
 
 	$(INSTALL_DIR) $(1)/usr/bin
-	$(INSTALL_BIN) $(PKG_BUILD_DIR)/scutclient $(1)/usr/bin/scutclient
+	$(INSTALL_BIN) \
+		$(PKG_BUILD_DIR)/scutclient \
+		$(1)/usr/bin/scutclient
 endef
 
 $(eval $(call BuildPackage,scutclient))

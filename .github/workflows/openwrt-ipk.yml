@@ -49,28 +49,69 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Verify OpenWrt package layout
+      - name: Verify source tree
         shell: bash
         run: |
           set -euxo pipefail
+
+          echo "GITHUB_SHA=$GITHUB_SHA"
+          git log -1 --oneline
+
+          test -f CMakeLists.txt
+          test -f COPYING
+          test -d src
+
           test -f openwrt/Makefile
           test -f openwrt/files/scutclient.config
           test -f openwrt/files/scutclient.init
           test -f openwrt/files/scutclient.hotplug
-          test -f CMakeLists.txt
-          test -d src
+
           grep -q '^PKG_NAME:=scutclient$' openwrt/Makefile
+
+      - name: Prepare OpenWrt feed
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          rm -rf .ci-feed
+
+          mkdir -p .ci-feed/scutclient/files
+
+          cp openwrt/Makefile \
+            .ci-feed/scutclient/Makefile
+
+          cp CMakeLists.txt \
+            .ci-feed/scutclient/CMakeLists.txt
+
+          cp COPYING \
+            .ci-feed/scutclient/COPYING
+
+          cp -a src \
+            .ci-feed/scutclient/src
+
+          cp openwrt/files/scutclient.config \
+            .ci-feed/scutclient/files/scutclient.config
+
+          cp openwrt/files/scutclient.init \
+            .ci-feed/scutclient/files/scutclient.init
+
+          cp openwrt/files/scutclient.hotplug \
+            .ci-feed/scutclient/files/scutclient.hotplug
+
+          echo "===== CI feed ====="
+          find .ci-feed -maxdepth 4 -type f -print
+
+          echo "===== package Makefile ====="
+          cat .ci-feed/scutclient/Makefile
 
       - name: Build scutclient
         uses: openwrt/gh-action-sdk@main
         env:
           ARCH: ${{ matrix.arch }}-22.03.7
-          FEED_DIR: ${{ github.workspace }}
+          FEED_DIR: ${{ github.workspace }}/.ci-feed
           FEEDNAME: scutclient_ci
           PACKAGES: scutclient
           BUILD_LOG: 1
-          # This workflow is for producing IPKs. Disable the action's optional
-          # in-place shfmt gate so shell formatting cannot block compilation.
           NO_SHFMT_CHECK: 1
           V: s
 
@@ -78,23 +119,37 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          echo "===== available build logs ====="
+          echo "===== available logs ====="
           find logs -type f -print 2>/dev/null || true
-          echo "===== compile log tails ====="
+
+          echo "===== dump logs ====="
           while IFS= read -r log; do
             echo "----- $log -----"
-            tail -n 200 "$log" || true
-          done < <(find logs -type f -name 'compile.txt' -print 2>/dev/null || true)
+            cat "$log" || true
+          done < <(
+            find logs -type f -name 'dump.txt' -print 2>/dev/null || true
+          )
+
+          echo "===== compile logs ====="
+          while IFS= read -r log; do
+            echo "----- $log -----"
+            tail -n 300 "$log" || true
+          done < <(
+            find logs -type f -name 'compile.txt' -print 2>/dev/null || true
+          )
 
       - name: Show generated packages
         if: always()
         shell: bash
         run: |
-          find bin -type f \( -name "*.ipk" -o -name "*.apk" \) -print 2>/dev/null || true
+          find bin -type f \
+            \( -name "*.ipk" -o -name "*.apk" \) \
+            -print 2>/dev/null || true
 
       - name: Upload IPK
         uses: actions/upload-artifact@v7
         with:
           name: scutclient-${{ matrix.arch }}-22.03.7
-          path: bin/packages/**/scutclient_ci/scutclient_*.ipk
+          path: |
+            bin/packages/**/scutclient_ci/scutclient_*.ipk
           if-no-files-found: error
