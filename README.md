@@ -63,7 +63,15 @@ log file under `/tmp/scutclient/<id>.log`. Single-instance commands:
 ```
 
 One WAN (logical interface, or the resolved Linux netdev) can only be bound by
-one instance; the init script refuses conflicting instances at start-up.
+one instance; the init script refuses conflicting instances at start-up. An
+instance without an explicit `interface` is skipped, never silently bound to
+`wan`.
+
+Startup is two-phase: all instance MACs are prepared and written to
+network/wireless UCI first, the network is reloaded **at most once**, then all
+WANs are awaited, netdevs are re-resolved and every expected MAC is verified
+before the procd instances are spawned. During the network apply a lock file
+(`/var/run/scutclient-network-apply.lock`) keeps the hotplug handler quiet.
 
 ### Command line
 ```bash
@@ -94,11 +102,14 @@ scutclient --username <username> --password <password> [options...]
 ### MAC helper
 
 `/usr/lib/scutclient/scutclient-mac` manages per-instance MAC spoofing
-(keep / random / custom) on wired devices or wireless STA interfaces:
+(keep / random / custom) on wired devices or wireless STA interfaces. It never
+reloads networking itself:
 
 ```sh
-scutclient-mac apply <instance>   # apply configured MAC, print effective one
-scutclient-mac gen                # print a random locally administered MAC
+scutclient-mac gen                 # print a random locally administered MAC
+scutclient-mac prepare <instance>  # persist MAC into network/wireless UCI,
+                                   # print: none | network | wireless
+scutclient-mac verify <instance>   # resolve current netdev and compare MACs
 ```
 
 If any advice, open an issue or contact us at SCUT Router Group.

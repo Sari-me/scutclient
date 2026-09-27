@@ -2,18 +2,25 @@
 # scutclient-mac - per-instance MAC helper for scutclient.
 #
 # Commands:
-#   scutclient-mac apply <instance>  Apply the instance MAC (per mac_mode) to
-#                                    the bound network device. On success the
-#                                    effective MAC is printed on stdout.
-#   scutclient-mac gen               Print a random locally administered,
-#                                    unicast MAC address.
+#   scutclient-mac gen                 Print a random locally administered,
+#                                      unicast MAC address.
+#   scutclient-mac prepare <instance>  Make sure the instance has a MAC and
+#                                      that it is written into network /
+#                                      wireless UCI. NEVER reloads networking.
+#                                      Prints one of: none / network / wireless
+#                                      (which config was touched).
+#   scutclient-mac verify <instance>   Resolve the current real netdev and
+#                                      compare its MAC with the configured
+#                                      target. Prints the device name.
 #
-# Security: only UCI section names of /etc/config/scutclient are accepted as
-# instance identifiers; devices are always resolved from UCI/ubus, never from
-# caller supplied paths or commands.
+# The helper never runs `wifi reload` or `/etc/init.d/network reload`:
+# multi-instance startup prepares ALL instance MACs first and applies the
+# network with a single reload, so a per-instance reload cannot tear down
+# other instances. Only UCI section names of /etc/config/scutclient are
+# accepted as instance identifiers.
 
 CONFIG="scutclient"
-WAIT_SECONDS=20
+GEN_ATTEMPTS=16
 
 die() {
 	logger -t scutclient-mac "$1"
@@ -22,8 +29,9 @@ die() {
 }
 
 usage() {
-	echo "Usage: scutclient-mac apply <instance>" >&2
-	echo "       scutclient-mac gen" >&2
+	echo "Usage: scutclient-mac gen" >&2
+	echo "       scutclient-mac prepare <instance>" >&2
+	echo "       scutclient-mac verify <instance>" >&2
 	exit 1
 }
 
@@ -122,98 +130,145 @@ apply_wireless_mac() {
 	uci -q commit wireless
 }
 
-wait_for_mac() {
-	local dev="$1" mac="$2"
-	local i=0 cur=""
+# Random MAC unique across every other instance in /etc/config/scutclient.
+gen_unique_mac() {
+	local section="$1"
+	local i=0 candidate conflict sec other
 
-	while [ "$i" -lt "$WAIT_SECONDS" ]; do
-		cur="$(cat "/sys/class/net/$dev/address" 2>/dev/null)"
-		[ -n "$cur" ] && [ "$(lower "$cur")" = "$(lower "$mac")" ] && return 0
+	while [ "$i" -lt "$GEN_ATTEMPTS" ]; do
+		candidate="$(cmd_gen)"
+		conflict=0
+
+		for sec in $(uci -q show "$CONFIG" 2>/dev/null | \
+				grep "=scutclient$" | cut -d. -f2 | cut -d= -f1); do
+			[ "$sec" = "$section" ] && continue
+			other="$(uci -q get "$CONFIG.$sec.macaddr" 2>/dev/null)"
+			[ -n "$other" ] || continue
+			[ "$(lower "$other")" = "$(lower "$candidate")" ] && conflict=1
+		done
+
+		[ "$conflict" -eq 0 ] && {
+			printf '%s\n' "$candidate"
+			return 0
+		}
+
 		i=$((i + 1))
-		sleep 1
 	done
+
 	return 1
 }
 
-cmd_apply() {
+valid_mac() {
+	printf '%s' "$1" | grep -qiE '^[0-9a-f]{2}(:[0-9a-f]{2}){5}$'
+}
+
+cmd_prepare() {
 	local section="$1"
 	local mac_mode macaddr interface dev cur_mac
 
 	[ -n "$section" ] || usage
 	[ "$(instance_type "$section")" = "scutclient" ] || \
-		die "apply: no such scutclient instance '$section'"
+		die "prepare: no such scutclient instance '$section'"
 
 	mac_mode="$(uci -q get "$CONFIG.$section.mac_mode" 2>/dev/null)"
 	mac_mode="${mac_mode:-keep}"
-	[ "$mac_mode" = "keep" ] && return 0
+
+	[ "$mac_mode" = "keep" ] && {
+		echo none
+		return 0
+	}
 
 	macaddr="$(uci -q get "$CONFIG.$section.macaddr" 2>/dev/null)"
 
 	if [ "$mac_mode" = "random" ]; then
 		if [ -z "$macaddr" ]; then
-			macaddr="$(cmd_gen)"
+			macaddr="$(gen_unique_mac "$section")" || \
+				die "prepare: unable to generate a unique random MAC for '$section'"
 			uci -q set "$CONFIG.$section.macaddr=$macaddr"
 			uci -q commit "$CONFIG"
 			logger -t scutclient-mac \
 				"instance '$section': generated random MAC $macaddr"
 		fi
 	else
-		[ "$mac_mode" = "custom" ] || die "apply: unknown mac_mode '$mac_mode'"
+		[ "$mac_mode" = "custom" ] || \
+			die "prepare: unknown mac_mode '$mac_mode'"
 		[ -n "$macaddr" ] || \
-			die "apply: instance '$section' uses custom MAC but macaddr is empty"
+			die "prepare: instance '$section' uses custom MAC but macaddr is empty"
 	fi
 
-	printf '%s' "$macaddr" | grep -qiE '^[0-9a-f]{2}(:[0-9a-f]{2}){5}$' || \
-		die "apply: instance '$section' has invalid macaddr '$macaddr'"
+	valid_mac "$macaddr" || \
+		die "prepare: instance '$section' has invalid macaddr '$macaddr'"
 
 	interface="$(uci -q get "$CONFIG.$section.interface" 2>/dev/null)"
-	interface="${interface:-wan}"
+	[ -n "$interface" ] || \
+		die "prepare: instance '$section' has no interface configured"
 
 	dev="$(resolve_device "$interface")" || \
-		die "apply: unable to resolve device of instance '$section' ($interface)"
+		die "prepare: unable to resolve device of instance '$section' ($interface)"
 
 	cur_mac="$(cat "/sys/class/net/$dev/address" 2>/dev/null)"
 	if [ "$(lower "$cur_mac")" = "$(lower "$macaddr")" ]; then
-		printf '%s\n' "$macaddr"
+		echo none
 		return 0
 	fi
 
 	if [ -e "/sys/class/net/$dev/phy80211" ] || \
 	   find_wifi_section "$interface" >/dev/null 2>&1; then
-		if apply_wireless_mac "$interface" "$macaddr"; then
-			wifi reload
-		else
-			logger -t scutclient-mac \
-				"instance '$section': no wireless STA section for '$interface', applying MAC at runtime only"
-			ip link set dev "$dev" address "$macaddr" 2>/dev/null || \
-				ifconfig "$dev" hw ether "$macaddr" 2>/dev/null || \
-				die "apply: unable to set MAC on '$dev'"
-			wait_for_mac "$dev" "$macaddr" || \
-				die "apply: MAC on '$dev' did not become $macaddr"
-			printf '%s\n' "$macaddr"
-			return 0
-		fi
+		apply_wireless_mac "$interface" "$macaddr" || \
+			die "prepare: no wireless STA section for '$interface' (instance '$section')"
+		echo wireless
 	else
 		apply_wired_mac "$dev" "$macaddr" || \
-			die "apply: unable to persist MAC for '$dev'"
-		/etc/init.d/network reload
+			die "prepare: unable to persist MAC for '$dev'"
+		echo network
 	fi
+}
 
-	wait_for_mac "$dev" "$macaddr" || \
-		die "apply: MAC on '$dev' did not become $macaddr within ${WAIT_SECONDS}s"
+cmd_verify() {
+	local section="$1"
+	local mac_mode macaddr interface dev cur_mac
 
-	logger -t scutclient-mac \
-		"instance '$section': applied MAC $macaddr on '$dev'"
-	printf '%s\n' "$macaddr"
+	[ -n "$section" ] || usage
+	[ "$(instance_type "$section")" = "scutclient" ] || \
+		die "verify: no such scutclient instance '$section'"
+
+	mac_mode="$(uci -q get "$CONFIG.$section.mac_mode" 2>/dev/null)"
+	mac_mode="${mac_mode:-keep}"
+
+	interface="$(uci -q get "$CONFIG.$section.interface" 2>/dev/null)"
+	[ -n "$interface" ] || \
+		die "verify: instance '$section' has no interface configured"
+
+	dev="$(resolve_device "$interface")" || \
+		die "verify: unable to resolve device of instance '$section' ($interface)"
+
+	[ "$mac_mode" = "keep" ] && {
+		printf '%s\n' "$dev"
+		return 0
+	}
+
+	macaddr="$(uci -q get "$CONFIG.$section.macaddr" 2>/dev/null)"
+	valid_mac "$macaddr" || \
+		die "verify: instance '$section' has invalid macaddr '$macaddr'"
+
+	cur_mac="$(cat "/sys/class/net/$dev/address" 2>/dev/null)"
+	[ "$(lower "$cur_mac")" = "$(lower "$macaddr")" ] || \
+		die "verify: MAC mismatch on '$dev': expected $macaddr, actual ${cur_mac:-unknown}"
+
+	printf '%s\n' "$dev"
 }
 
 case "$1" in
-	apply)
-		shift
-		cmd_apply "$@"
-		;;
 	gen)
 		cmd_gen
+		;;
+	prepare)
+		shift
+		cmd_prepare "$@"
+		;;
+	verify)
+		shift
+		cmd_verify "$@"
 		;;
 	*)
 		usage
