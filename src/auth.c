@@ -1,6 +1,7 @@
 #include "auth.h"
 #include "tracelog.h"
 #include "info.h"
+#include "runtime_status.h"
 
 struct in_addr local_ipaddr;
 uint8_t MAC[6];
@@ -142,6 +143,7 @@ int auth_8021x_Init() {
 				ExpectedMAC[0], ExpectedMAC[1], ExpectedMAC[2],
 				ExpectedMAC[3], ExpectedMAC[4], ExpectedMAC[5],
 				MAC[0], MAC[1], MAC[2], MAC[3], MAC[4], MAC[5]);
+		RuntimeStatusSet("error", "mac_mismatch");
 		ret = -1;
 		goto ERR;
 	}
@@ -432,6 +434,8 @@ int Authentication(int client) {
 		return 0;
 	}
 
+	RuntimeStatusSet("authenticating", "starting_8021x");
+
 	if (ret == 1) {
 		//如果收到EAP Failure，等待2秒再发送EAPOL Start
 		sleep(2);
@@ -491,6 +495,7 @@ int Authentication(int client) {
 			if ((lastHBDone == 0) && (time(NULL) - BaseHeartbeatTime > HBTimeout)) {
 				// 认为已经掉线
 				LogWrite(DRCOM, ERROR,	"Client: No response to last heartbeat.");
+				RuntimeStatusSet("reconnecting", "heartbeat_timeout");
 				ret = 1; //重拨
 				break;
 			}
@@ -561,6 +566,9 @@ int Drcom_UDP_Handler(uint8_t *recv_data) {
 				BaseHeartbeatTime = time(NULL);
 				lastHBDone = 1;
 				LogWrite(DRCOM, INF, "Server: MISC_HEART_BEAT_04. Waiting next heart beat cycle.");
+				// online = 802.1X 成功 + 至少完成一次 Dr.COM 心跳
+				RuntimeStatusSet("online", "heartbeat_ok");
+				RuntimeStatusHeartbeat();
 				break;
 			default:
 				LogWrite(DRCOM, ERROR, "Server: Unexpected heart beat request (type:0x%02hhx)!",
@@ -645,15 +653,19 @@ int auth_8021x_Handler(uint8_t recv_data[]) {
 		LogWrite(DOT1X, ERROR, "Server: Failure.");
 		if (times > 0) {
 			times--;
+			RuntimeStatusSet("reconnecting", "eap_failure_retry");
 			sleep(EAPTimeout);
 			/* 主动发起认证会话 */
 			return 1;
 		} else {
 			LogWrite(DOT1X, ERROR, "Reconnection failed. Server: errtype=0x%02hhx", errtype);
+			RuntimeStatusSet("auth_failed", "eap_failure");
 			exit(EXIT_FAILURE);
 		}
 	} else if ((EAP_Code) recv_data[18] == SUCCESS) {
 		LogWrite(DOT1X, INF, "Server: Success.");
+		// 802.1X 已成功，但 online 要等第一次 Dr.COM 心跳完成
+		RuntimeStatusSet("drcom_starting", "eap_success");
 		times = EAPRetries;
 		success_8021x = 1;
 		send_udp_data_len = Drcom_MISC_START_ALIVE_Setter(send_udp_data,

@@ -5,6 +5,7 @@
 #include "auth.h"
 #include "info.h"
 #include "tracelog.h"
+#include "runtime_status.h"
 #include <signal.h>
 
 struct sigaction sa_term;
@@ -66,6 +67,7 @@ void PrintHelp(const char * argn) {
 void handle_term(int signal) {
 	LogWrite(ALL, INF, "Exiting...");
 	auth_8021x_Logoff();
+	RuntimeStatusClose("stopped", "terminated");
 	LogClose();
 	exit(0);
 }
@@ -236,6 +238,9 @@ int main(int argc, char *argv[]) {
 
 	LogInit(inst_name, logfile_str, init_level, logmax, logkeep);
 
+	RuntimeStatusInit(inst_name);
+	RuntimeStatusSet("starting", "process_started");
+
 	LogWrite(ALL, INF, "scutclient built at: " __DATE__ " " __TIME__);
 	LogWrite(ALL, INF, "Authored by Scutclient Project");
 	LogWrite(ALL, INF, "Source code available at https://github.com/Sari-me/scutclient");
@@ -278,6 +283,7 @@ int main(int argc, char *argv[]) {
 		}
 	}
 	LogWrite(ALL, ERROR, "Exit.");
+	RuntimeStatusClose("stopped", "exit");
 	LogClose();
 	return 0;
 }
