@@ -39,6 +39,13 @@ extern int EAPRetries;   /* 802.1X retry times */
 extern int AuthMethod;            /* AUTH_DOT1X or AUTH_PORTAL */
 extern const char *PortalLocation; /* full captive portal Location URL */
 
+/* Web Portal tunables (CLI overridable) */
+extern const char *PortalSuffix;  /* appended to the account, e.g. "@dx" */
+extern int PortalConnectTimeout;  /* curl connect timeout, seconds */
+extern int PortalTimeout;         /* curl request timeout, seconds */
+extern int PortalCheckInterval;   /* online check / relogin interval, seconds */
+extern int PortalTlsVerify;       /* verify https:// portal certificates */
+
 /* Expected interface MAC (mac spoof verification). */
 extern unsigned char ExpectedMAC[6];
 extern int HaveExpectedMAC;

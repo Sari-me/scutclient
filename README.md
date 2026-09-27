@@ -97,15 +97,22 @@ scutclient --username <username> --password <password> [options...]
      --log-keep <n> Rotated log files to keep. Default 2.
      --auth-method <dot1x|portal> Authentication method. Default dot1x.
      --portal-location <url> Captive portal Location URL (portal mode).
+     --portal-suffix <suffix> Appended to the account, e.g. @dx (portal).
+     --portal-connect-timeout <sec> Portal connect timeout. Default 5.
+     --portal-timeout <sec> Portal request timeout. Default 10.
+     --portal-check-interval <sec> Portal online check interval. Default 15.
+     --portal-tls-verify <0|1> Verify https portal certificates. Default 1.
  -D, --debug [level] Enable debug output (numeric level 0-5).
  -o, --logoff
 ```
 
-`--auth-method portal` selects the Web Portal backend (captive portal
-login through the saved Location); the portal backend itself is not part
-of this build yet — the daemon rejects portal instances with a clear
-error until it lands. Every other option belongs to the 802.1X + Dr.COM
-backend.
+`--auth-method portal` runs the Web Portal backend (Dr.COM 哆点 4.x
+eportal/Radius web login): it checks `/drcom/chkstatus`, logs in through
+`/eportal/portal/login` on port 801 with the saved Location's host, keeps
+the session alive with an online check every `--portal-check-interval`
+seconds and re-logins automatically when the check reports offline. All
+requests are bound to the instance netdev; `--logoff` performs a portal
+logout for portal instances.
 
 ### MAC helper
 

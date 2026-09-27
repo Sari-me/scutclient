@@ -21,6 +21,12 @@ int EAPRetries = 3;
 int AuthMethod = AUTH_DOT1X;
 const char *PortalLocation = NULL;
 
+const char *PortalSuffix = NULL;
+int PortalConnectTimeout = 5;
+int PortalTimeout = 10;
+int PortalCheckInterval = 15;
+int PortalTlsVerify = 1;
+
 unsigned char ExpectedMAC[6] = { 0 };
 int HaveExpectedMAC = 0;
 

@@ -6,6 +6,7 @@
 #include "info.h"
 #include "tracelog.h"
 #include "runtime_status.h"
+#include "portal.h"
 #include <signal.h>
 
 struct sigaction sa_term;
@@ -35,6 +36,11 @@ static const struct option long_options[] = {
 	{"log-keep", required_argument, NULL, 1009},
 	{"auth-method", required_argument, NULL, 1010},
 	{"portal-location", required_argument, NULL, 1011},
+	{"portal-suffix", required_argument, NULL, 1012},
+	{"portal-connect-timeout", required_argument, NULL, 1013},
+	{"portal-timeout", required_argument, NULL, 1014},
+	{"portal-check-interval", required_argument, NULL, 1015},
+	{"portal-tls-verify", required_argument, NULL, 1016},
 	{"debug", optional_argument, NULL, 'D'},
 	{"logoff", no_argument, NULL, 'o'},
 	{NULL, no_argument, NULL, 0}
@@ -63,6 +69,11 @@ void PrintHelp(const char * argn) {
 		"     --log-keep <n> Rotated log files to keep. Default 2.\n"
 		"     --auth-method <dot1x|portal> Authentication method. Default dot1x.\n"
 		"     --portal-location <url> Captive portal Location URL (portal mode).\n"
+		"     --portal-suffix <suffix> Appended to the account, e.g. @dx (portal).\n"
+		"     --portal-connect-timeout <sec> Portal connect timeout. Default 5.\n"
+		"     --portal-timeout <sec> Portal request timeout. Default 10.\n"
+		"     --portal-check-interval <sec> Portal online check interval. Default 15.\n"
+		"     --portal-tls-verify <0|1> Verify https portal certificates. Default 1.\n"
 		" -D, --debug [level] Enable debug output (numeric level 0-5).\n"
 		" -o, --logoff\n",
 		argn);
@@ -70,7 +81,12 @@ void PrintHelp(const char * argn) {
 
 void handle_term(int signal) {
 	LogWrite(ALL, INF, "Exiting...");
-	auth_8021x_Logoff();
+
+	if (AuthMethod == AUTH_PORTAL)
+		PortalLogout();
+	else
+		auth_8021x_Logoff();
+
 	RuntimeStatusClose("stopped", "terminated");
 	LogClose();
 	exit(0);
@@ -189,6 +205,21 @@ int main(int argc, char *argv[]) {
 		case 1011:
 			PortalLocation = optarg;
 			break;
+		case 1012:
+			PortalSuffix = optarg;
+			break;
+		case 1013:
+			PortalConnectTimeout = atoi(optarg);
+			break;
+		case 1014:
+			PortalTimeout = atoi(optarg);
+			break;
+		case 1015:
+			PortalCheckInterval = atoi(optarg);
+			break;
+		case 1016:
+			PortalTlsVerify = atoi(optarg);
+			break;
 		case 'D':
 			if (optarg) {
 				tmpdbg = atoi(optarg);
@@ -258,22 +289,34 @@ int main(int argc, char *argv[]) {
 	RuntimeStatusInit(inst_name);
 	RuntimeStatusSet("starting", "process_started");
 
-	/* Portal 后端尚未实现：显式报错退出，避免静默按 802.1X 认证 */
+	/* Portal 后端：在线检测 + 自动重登录主循环（--logoff 时只注销一次） */
 	if (AuthMethod == AUTH_PORTAL) {
-		if (!PortalLocation || strncmp(PortalLocation, "http://", 7) != 0) {
-			if (!PortalLocation || strncmp(PortalLocation, "https://", 8) != 0) {
-				RuntimeStatusSet("error", "portal_location_invalid");
-				LogWrite(INIT, ERROR,
-						"Portal authentication requires a http(s):// Location!");
-				LogClose();
-				exit(-1);
-			}
+		if (!PortalLocation ||
+				(strncmp(PortalLocation, "http://", 7) != 0 &&
+				 strncmp(PortalLocation, "https://", 8) != 0)) {
+			RuntimeStatusSet("error", "portal_location_invalid");
+			LogWrite(INIT, ERROR,
+					"Portal authentication requires a http(s):// Location!");
+			LogClose();
+			exit(-1);
 		}
-		RuntimeStatusSet("error", "portal_not_implemented");
-		LogWrite(INIT, ERROR,
-				"Portal authentication backend is not implemented in this build yet!");
-		LogClose();
-		exit(-1);
+
+		if (PortalConnectTimeout < 1 || PortalConnectTimeout > 120 ||
+				PortalTimeout < 1 || PortalTimeout > 600 ||
+				PortalCheckInterval < 5 || PortalCheckInterval > 3600) {
+			RuntimeStatusSet("error", "portal_options_invalid");
+			LogWrite(INIT, ERROR, "Portal parameters out of range!");
+			LogClose();
+			exit(-1);
+		}
+
+		if (client == LOGOFF) {
+			PortalLogout();
+			LogClose();
+			return 0;
+		}
+
+		PortalRun();
 	}
 
 	LogWrite(ALL, INF, "scutclient built at: " __DATE__ " " __TIME__);

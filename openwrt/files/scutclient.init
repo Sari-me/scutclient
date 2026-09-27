@@ -417,9 +417,25 @@ scutclient_start_instance() {
 
 	# 按实例分发认证方式；portal 的 Location 已在前面校验过
 	if [ "$auth_method" = "portal" ]; then
+		local portal_suffix portal_connect_timeout portal_timeout
+		local portal_check_interval portal_tls_verify
+
+		config_get portal_suffix "$section" portal_suffix ""
+		config_get portal_connect_timeout "$section" portal_connect_timeout "5"
+		config_get portal_timeout "$section" portal_timeout "10"
+		config_get portal_check_interval "$section" portal_check_interval "15"
+		config_get_bool portal_tls_verify "$section" portal_tls_verify 1
+
 		procd_append_param command \
 			--auth-method portal \
-			--portal-location "$portal_location"
+			--portal-location "$portal_location" \
+			--portal-connect-timeout "$portal_connect_timeout" \
+			--portal-timeout "$portal_timeout" \
+			--portal-check-interval "$portal_check_interval" \
+			--portal-tls-verify "$portal_tls_verify"
+
+		[ -n "$portal_suffix" ] && \
+			procd_append_param command --portal-suffix "$portal_suffix"
 	else
 		procd_append_param command --auth-method dot1x
 	fi
@@ -485,9 +501,13 @@ reload_service() {
 scutclient_logoff_instance() {
 	local section="$1"
 	local interface=""
+	local auth_method="dot1x"
+	local portal_location=""
 	local ifname=""
 
 	config_get interface "$section" interface ""
+	config_get auth_method "$section" auth_method "dot1x"
+	config_get portal_location "$section" portal_location ""
 
 	[ -n "$interface" ] || {
 		logger -t scutclient \
@@ -502,6 +522,21 @@ scutclient_logoff_instance() {
 			"Unable to log off: cannot resolve '$interface'"
 		return 1
 	}
+
+	if [ "$auth_method" = "portal" ]; then
+		case "$portal_location" in
+			http://*|https://*)
+				"$PROG" --iface "$ifname" --auth-method portal \
+					--portal-location "$portal_location" --logoff
+				return 0
+				;;
+			*)
+				logger -t scutclient \
+					"Unable to log off $section: portal Location is empty or invalid"
+				return 1
+				;;
+		esac
+	fi
 
 	"$PROG" --iface "$ifname" --logoff
 }
