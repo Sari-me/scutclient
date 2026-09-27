@@ -711,7 +711,11 @@ int auth_8021x_Handler(uint8_t recv_data[]) {
 		isNeedHeartBeat = 1;
 		BaseHeartbeatTime = time(NULL);
 		lastHBDone = 0;
-		auth_UDP_Sender(send_udp_data, send_udp_data_len);
+		LogWrite(DRCOM, INF, "Client: Send MISC_START_ALIVE.");
+		if (!auth_UDP_Sender(send_udp_data, send_udp_data_len)) {
+			RuntimeStatusSet("reconnecting", "heartbeat_send_failed");
+			return 1;
+		}
 	}
 	// 只有大于0才发送
 	if (send_8021x_data_len > 0) {
