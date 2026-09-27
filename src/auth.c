@@ -373,7 +373,7 @@ int loginToGetServerMAC(uint8_t recv_data[]) {
 	auth_8021x_Sender(send_8021x_data, send_8021x_data_len);
 	LogWrite(DOT1X, INF, "%s", "Client: Multcast Start.");
 	times = EAPRetries;
-	while (resev == 0) {
+	while (resev == 0 && !ScutTerminate) {
 		FD_ZERO(&fdR);
 		FD_SET(auth_8021x_sock, &fdR);
 		tmp_timeout = timeout;
@@ -467,7 +467,15 @@ int Authentication(int client) {
 
 	// 计时心跳时间
 	BaseHeartbeatTime = time(NULL);
-	while (resev) {
+	while (resev && !ScutTerminate) {
+		/* SIGTERM：socket 仍打开，走正常 EAPOL Logoff 后退出 */
+		if (ScutTerminate) {
+			LogWrite(DOT1X, INF, "Client: terminated, sending logoff.");
+			resev = 0;
+			ret = 0;
+			break;
+		}
+
 		FD_ZERO(&fdR);
 		FD_SET(auth_8021x_sock, &fdR);
 		FD_SET(auth_udp_sock, &fdR);

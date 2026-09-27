@@ -14,6 +14,7 @@
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 #include <getopt.h>
+#include <signal.h>
 
 extern struct in_addr udpserver_ipaddr;
 extern struct in_addr dns_ipaddr;
@@ -51,6 +52,11 @@ extern int PortalCheckInterval;   /* online check / relogin interval, seconds */
 extern int PortalTlsVerify;       /* verify https:// portal certificates */
 extern int PortalEportalHttpPort;  /* ePortal login port for http Locations */
 extern int PortalEportalHttpsPort; /* ePortal login port for https Locations */
+
+/* SIGTERM/SIGINT 只置位该标志，实际注销/落盘在正常控制流中执行
+ * （handler 内做网络 I/O/stdio 非异步安全）。 */
+extern volatile sig_atomic_t ScutTerminate;
+int ScutSleepInterruptible(int seconds);
 extern const char *PortalProgramIndex; /* Dr.COM Web program index override */
 extern int PortalPageIndex;            /* Dr.COM Web page index override */
 extern const char *PortalJsVersion;    /* Dr.COM Web jsVersion override */

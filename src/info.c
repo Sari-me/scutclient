@@ -21,6 +21,18 @@ int EAPRetries = 3;
 int AuthMethod = AUTH_DOT1X;
 const char *PortalLocation = NULL;
 
+volatile sig_atomic_t ScutTerminate = 0;
+
+/* 按 1 秒分片休眠，随时响应终止标志；返回 1 表示期间收到终止请求 */
+int ScutSleepInterruptible(int seconds) {
+	int i;
+
+	for (i = 0; i < seconds && !ScutTerminate; i++)
+		sleep(1);
+
+	return ScutTerminate ? 1 : 0;
+}
+
 const char *PortalSuffix = NULL;
 int PortalConnectTimeout = 5;
 int PortalTimeout = 10;

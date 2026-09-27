@@ -96,16 +96,9 @@ void PrintHelp(const char * argn) {
 }
 
 void handle_term(int signal) {
-	LogWrite(ALL, INF, "Exiting...");
-
-	if (AuthMethod == AUTH_PORTAL)
-		PortalLogout();
-	else
-		auth_8021x_Logoff();
-
-	RuntimeStatusClose("stopped", "terminated");
-	LogClose();
-	exit(0);
+	/* 仅置位：注销/落盘在正常控制流中执行（handler 内做网络 I/O
+	 * 与 stdio 非异步安全）。procd 的 KILL 兜底不受影响。 */
+	ScutTerminate = 1;
 }
 
 int main(int argc, char *argv[]) {
@@ -409,14 +402,15 @@ int main(int argc, char *argv[]) {
 	}
 
 	/* 调用子函数完成802.1X认证 */
-	while(1) {
+	while (!ScutTerminate) {
 		ret = Authentication(client);
 		if(ret == 1) {
 			retry_time = 1;
 			LogWrite(ALL, INF, "Restart authentication.");
 		} else if(ret == -ENETUNREACH) {
 			LogWrite(ALL, INF, "Retry in %d secs.", retry_time);
-			sleep(retry_time);
+			if (ScutSleepInterruptible((int) retry_time))
+				break;
 			if (retry_time <= 256)
 				retry_time *= 2;
 		} else if(timeNotAllowed && (a_minute < 60)) {
@@ -428,7 +422,11 @@ int main(int argc, char *argv[]) {
 				if (OfflineHookCmd) {
 					system(OfflineHookCmd);
 				}
-				sleep((((int)a_hour * 60 + a_minute) - ((int)(cltime -> tm_hour) * 60 + cltime -> tm_min)) * 60 - cltime -> tm_sec);
+				if (ScutSleepInterruptible(
+						(((int)a_hour * 60 + a_minute) -
+						((int)(cltime -> tm_hour) * 60 + cltime -> tm_min)) * 60 -
+						cltime -> tm_sec))
+					break;
 			} else {
 				break;
 			}
@@ -437,7 +435,8 @@ int main(int argc, char *argv[]) {
 		}
 	}
 	LogWrite(ALL, ERROR, "Exit.");
-	RuntimeStatusClose("stopped", "exit");
+	/* ScutTerminate 置位时，Authentication 内部已发送 EAPOL Logoff */
+	RuntimeStatusClose(ScutTerminate ? "stopped" : "stopped", "exit");
 	LogClose();
 	return 0;
 }

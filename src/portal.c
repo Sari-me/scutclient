@@ -654,14 +654,14 @@ void PortalRun(void) {
 			PortalLoginBackend == PORTAL_LOGIN_EPORTAL ?
 			"eportal" : "drcom");
 
-	for (;;) {
+	while (!ScutTerminate) {
 		PortalStatusInfo st;
 		int login_rc;
 
 		msg[0] = 0;
 
 		if (portal_refresh_network() != 0) {
-			sleep(PortalCheckInterval);
+			ScutSleepInterruptible(PortalCheckInterval);
 			continue;
 		}
 
@@ -670,7 +670,7 @@ void PortalRun(void) {
 			delay = PortalCheckInterval *
 					(1 << (PortalCtx.transport_failures > 4 ?
 					4 : PortalCtx.transport_failures));
-			sleep(delay);
+			ScutSleepInterruptible(delay);
 			continue;
 		}
 
@@ -679,7 +679,7 @@ void PortalRun(void) {
 			RuntimeStatusHeartbeat();
 			PortalCtx.transport_failures = 0;
 			PortalCtx.auth_failures = 0;
-			sleep(PortalCheckInterval);
+			ScutSleepInterruptible(PortalCheckInterval);
 			continue;
 		}
 
@@ -693,7 +693,7 @@ void PortalRun(void) {
 			LogWrite(DRCOM, INF, "Portal: login verified via chkstatus.");
 			PortalCtx.transport_failures = 0;
 			PortalCtx.auth_failures = 0;
-			sleep(PortalCheckInterval);
+			ScutSleepInterruptible(PortalCheckInterval);
 		} else if (login_rc == 1) {
 			/* 传输/确认类失败：指数退避 */
 			RuntimeStatusSet("reconnecting",
@@ -704,7 +704,7 @@ void PortalRun(void) {
 					4 : PortalCtx.transport_failures));
 			LogWrite(DRCOM, WARN,
 					"Portal: retry in %us (%s).", delay, msg);
-			sleep(delay);
+			ScutSleepInterruptible(delay);
 		} else {
 			/* 账号/协议失败：慢速重试（30s），等用户改配置 */
 			RuntimeStatusSet("auth_failed", msg);
@@ -712,7 +712,12 @@ void PortalRun(void) {
 			LogWrite(DRCOM, ERROR,
 					"Portal: auth failed (%s), retry in 30s.",
 					msg);
-			sleep(30);
+			ScutSleepInterruptible(30);
 		}
 	}
+
+	/* 正常控制流中注销并落盘（handler 只置位） */
+	PortalLogout();
+	RuntimeStatusClose("stopped", "terminated");
+	LogClose();
 }

@@ -217,6 +217,7 @@ scutclient_check_exclusive() {
 scutclient_prepare_phase() {
 	local section="$1"
 	local enabled username password interface mac_mode
+	local auth_method portal_location
 	local result=""
 
 	config_get_bool enabled "$section" enabled 1
@@ -226,6 +227,8 @@ scutclient_prepare_phase() {
 	config_get password "$section" password ""
 	config_get interface "$section" interface ""
 	config_get mac_mode "$section" mac_mode "keep"
+	config_get auth_method "$section" auth_method "dot1x"
+	config_get portal_location "$section" portal_location ""
 
 	[ -n "$username" ] || {
 		logger -t scutclient "Skip $section: username is empty"
