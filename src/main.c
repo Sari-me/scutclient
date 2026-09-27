@@ -27,6 +27,11 @@ static const struct option long_options[] = {
 	{"eap-timeout", required_argument, NULL, 1002},
 	{"eap-retries", required_argument, NULL, 1003},
 	{"expected-mac", required_argument, NULL, 1004},
+	{"instance", required_argument, NULL, 1005},
+	{"log-level", required_argument, NULL, 1006},
+	{"log-file", required_argument, NULL, 1007},
+	{"log-max-size", required_argument, NULL, 1008},
+	{"log-keep", required_argument, NULL, 1009},
 	{"debug", optional_argument, NULL, 'D'},
 	{"logoff", no_argument, NULL, 'o'},
 	{NULL, no_argument, NULL, 0}
@@ -48,7 +53,12 @@ void PrintHelp(const char * argn) {
 		"     --eap-timeout <sec> 802.1X receive timeout. Default 1.\n"
 		"     --eap-retries <times> 802.1X retry times. Default 3.\n"
 		"     --expected-mac <mac> Abort if the interface MAC does not match.\n"
-		" -D, --debug\n"
+		"     --instance <id> Instance name written into every log line.\n"
+		"     --log-level <error|warn|info|debug|trace> Log level. Default info.\n"
+		"     --log-file <path|off> Per-instance log file. Default /tmp/scutclient.log.\n"
+		"     --log-max-size <bytes> Rotate the log beyond this size. Default 262144.\n"
+		"     --log-keep <n> Rotated log files to keep. Default 2.\n"
+		" -D, --debug [level] Enable debug output (numeric level 0-5).\n"
 		" -o, --logoff\n",
 		argn);
 }
@@ -56,15 +66,11 @@ void PrintHelp(const char * argn) {
 void handle_term(int signal) {
 	LogWrite(ALL, INF, "Exiting...");
 	auth_8021x_Logoff();
+	LogClose();
 	exit(0);
 }
 
 int main(int argc, char *argv[]) {
-	LogWrite(ALL, INF, "scutclient built at: " __DATE__ " " __TIME__);
-	LogWrite(ALL, INF, "Authored by Scutclient Project");
-	LogWrite(ALL, INF, "Source code available at https://github.com/Sari-me/scutclient");
-	LogWrite(ALL, INF, "Contact us with QQ group 262939451");
-	LogWrite(ALL, INF, "#######################################");
 	int client = 1;
 	int ch, tmpdbg;
 	uint8_t a_hour = 255, a_minute = 255;
@@ -72,6 +78,15 @@ int main(int argc, char *argv[]) {
 	unsigned int retry_time = 1;
 	time_t ctime;
 	struct tm * cltime;
+
+	const char *inst_name = NULL;
+	const char *loglev_str = NULL;
+	const char *logfile_str = NULL;
+	unsigned long logmax = 0;
+	int logkeep = 0;
+	int dbgflag = 0;
+	int dbglevel = -1;
+	LOGLEVEL init_level = INF;
 
 	while ((ch = getopt_long(argc, argv, "u:p:i:n:H:s:c:T:h:E:Q:D::o",
 			long_options, NULL)) != -1) {
@@ -140,16 +155,31 @@ int main(int argc, char *argv[]) {
 			}
 			HaveExpectedMAC = 1;
 			break;
+		case 1005:
+			inst_name = optarg;
+			break;
+		case 1006:
+			loglev_str = optarg;
+			break;
+		case 1007:
+			logfile_str = optarg;
+			break;
+		case 1008:
+			logmax = (unsigned long) atol(optarg);
+			break;
+		case 1009:
+			logkeep = atoi(optarg);
+			break;
 		case 'D':
 			if (optarg) {
 				tmpdbg = atoi(optarg);
 				if ((tmpdbg < NONE) || (tmpdbg > TRACE)) {
 					LogWrite(INIT, ERROR, "Invalid debug level!");
 				} else {
-					cloglev = tmpdbg;
+					dbglevel = tmpdbg;
 				}
 			} else {
-				cloglev = DEBUG;
+				dbgflag = 1;
 			}
 			break;
 		case 'o':
@@ -181,6 +211,36 @@ int main(int argc, char *argv[]) {
 		LogWrite(INIT, ERROR, "Heartbeat/EAP parameters out of range!");
 		exit(-1);
 	}
+
+	/* 日志初始化（等级/文件/轮转），必须先于横幅输出 */
+	if (loglev_str) {
+		if (!strcmp(loglev_str, "error")) {
+			init_level = ERROR;
+		} else if (!strcmp(loglev_str, "warn")) {
+			init_level = WARN;
+		} else if (!strcmp(loglev_str, "info")) {
+			init_level = INF;
+		} else if (!strcmp(loglev_str, "debug")) {
+			init_level = DEBUG;
+		} else if (!strcmp(loglev_str, "trace")) {
+			init_level = TRACE;
+		} else {
+			LogWrite(INIT, ERROR, "Invalid log level '%s'!", loglev_str);
+			exit(-1);
+		}
+	} else if (dbglevel >= 0) {
+		init_level = (LOGLEVEL) dbglevel;
+	} else if (dbgflag) {
+		init_level = DEBUG;
+	}
+
+	LogInit(inst_name, logfile_str, init_level, logmax, logkeep);
+
+	LogWrite(ALL, INF, "scutclient built at: " __DATE__ " " __TIME__);
+	LogWrite(ALL, INF, "Authored by Scutclient Project");
+	LogWrite(ALL, INF, "Source code available at https://github.com/Sari-me/scutclient");
+	LogWrite(ALL, INF, "Contact us with QQ group 262939451");
+	LogWrite(ALL, INF, "#######################################");
 
 	/* 配置退出登录的signal handler */
 	sa_term.sa_handler = &handle_term;
@@ -218,5 +278,6 @@ int main(int argc, char *argv[]) {
 		}
 	}
 	LogWrite(ALL, ERROR, "Exit.");
+	LogClose();
 	return 0;
 }
