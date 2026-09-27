@@ -332,6 +332,21 @@ int main(int argc, char *argv[]) {
 	RuntimeStatusSetField("route_isolation",
 			RouteIsolation ? RouteIsolation : "native");
 
+	/* 配置退出登录的 signal handler：
+	 * 必须在 backend dispatch（PortalRun 不返回）之前安装，
+	 * 否则 Portal 模式的 SIGTERM 会走默认处理，无法注销/落盘 */
+	sa_term.sa_handler = &handle_term;
+	sa_term.sa_flags = SA_RESETHAND;
+	sigfillset(&sa_term.sa_mask);
+	sigaction(SIGTERM, &sa_term, NULL);
+	sigaction(SIGINT, &sa_term, NULL);
+
+	LogWrite(ALL, INF, "scutclient built at: " __DATE__ " " __TIME__);
+	LogWrite(ALL, INF, "Authored by Scutclient Project");
+	LogWrite(ALL, INF, "Source code available at https://github.com/Sari-me/scutclient");
+	LogWrite(ALL, INF, "Contact us with QQ group 262939451");
+	LogWrite(ALL, INF, "#######################################");
+
 	/* 以下校验在日志/状态就绪后执行：失败原因可完整落盘 */
 	if ((client != LOGOFF) &&
 			!((UserName && Password && UserName[0] && Password[0]))) {
@@ -341,12 +356,23 @@ int main(int argc, char *argv[]) {
 		exit(-1);
 	}
 
-	if (HBInterval < 1 || HBInterval > 3600 ||
+	if (AuthMethod == AUTH_DOT1X &&
+			(HBInterval < 1 || HBInterval > 3600 ||
 			HBTimeout < 1 || HBTimeout > 3600 ||
 			EAPTimeout < 1 || EAPTimeout > 3600 ||
-			EAPRetries < 1 || EAPRetries > 100) {
+			EAPRetries < 1 || EAPRetries > 100)) {
 		RuntimeStatusSet("error", "parameters_out_of_range");
 		LogWrite(INIT, ERROR, "Heartbeat/EAP parameters out of range!");
+		LogClose();
+		exit(-1);
+	}
+
+	if (RouteIsolation && RouteIsolation[0] &&
+			strcmp(RouteIsolation, "native") != 0 &&
+			strcmp(RouteIsolation, "mwan3") != 0) {
+		RuntimeStatusSet("error", "route_isolation_invalid");
+		LogWrite(INIT, ERROR, "Invalid route isolation '%s'!",
+				RouteIsolation);
 		LogClose();
 		exit(-1);
 	}
@@ -379,20 +405,8 @@ int main(int argc, char *argv[]) {
 		}
 
 		PortalRun();
+		return 0;
 	}
-
-	LogWrite(ALL, INF, "scutclient built at: " __DATE__ " " __TIME__);
-	LogWrite(ALL, INF, "Authored by Scutclient Project");
-	LogWrite(ALL, INF, "Source code available at https://github.com/Sari-me/scutclient");
-	LogWrite(ALL, INF, "Contact us with QQ group 262939451");
-	LogWrite(ALL, INF, "#######################################");
-
-	/* 配置退出登录的signal handler */
-	sa_term.sa_handler = &handle_term;
-	sa_term.sa_flags = SA_RESETHAND;
-	sigfillset(&sa_term.sa_mask);
-	sigaction(SIGTERM, &sa_term, NULL);
-	sigaction(SIGINT, &sa_term, NULL);
 
 	/* 调用子函数完成802.1X认证 */
 	while(1) {

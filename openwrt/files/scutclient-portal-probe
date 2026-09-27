@@ -24,6 +24,13 @@ logical_if="$1"
 device="$2"
 source_ip="$3"
 
+# logical_if 仅用于 mwan3 use 前缀：字符集校验，防注入
+case "$logical_if" in
+	""|*[!A-Za-z0-9_.-]*)
+		logical_if=""
+		;;
+esac
+
 case "$device" in
 	""|*[!A-Za-z0-9_.:-]*)
 		echo "error=invalid_device"

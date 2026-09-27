@@ -243,6 +243,17 @@ scutclient_prepare_phase() {
 		return 1
 	}
 
+	if [ "$auth_method" = "portal" ]; then
+		case "$portal_location" in
+			http://*|https://*) ;;
+			*)
+				logger -t scutclient \
+					"Skip $section: portal Location is empty or invalid"
+				return 1
+				;;
+		esac
+	fi
+
 	WAIT_INTERFACES="$WAIT_INTERFACES $interface"
 
 	[ "$mac_mode" != "keep" ] || return 0
@@ -364,6 +375,9 @@ scutclient_start_instance() {
 	config_get log_keep "$section" log_keep "2"
 	config_get_bool log_system "$section" log_system 1
 	config_get_bool log_file "$section" log_file 1
+
+	config_get auth_method "$section" auth_method "dot1x"
+	config_get portal_location "$section" portal_location ""
 
 	# reload 之后重新解析真实 netdev（无线 STA 的 netdev 可能变化）
 	ifname="$(scutclient_resolve_device "$interface")"
