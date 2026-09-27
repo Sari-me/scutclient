@@ -214,7 +214,9 @@ int auth_UDP_Init() {
 		return auth_udp_sock;
 	}
 
-	if ((setsockopt(auth_udp_sock, SOL_SOCKET, SO_REUSEADDR | SO_BROADCAST, &on,
+	if ((setsockopt(auth_udp_sock, SOL_SOCKET, SO_REUSEADDR, &on,
+			sizeof(on))) < 0 ||
+	    (setsockopt(auth_udp_sock, SOL_SOCKET, SO_BROADCAST, &on,
 			sizeof(on))) < 0) {
 		LogWrite(DRCOM, ERROR, "UDP setsockopt failed: %s", strerror(errno));
 		close(auth_udp_sock);

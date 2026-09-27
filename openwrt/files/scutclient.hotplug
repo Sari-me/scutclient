@@ -5,39 +5,36 @@
 
 . /lib/functions.sh
 
-SC_ENABLED=0
-SC_MATCHED=0
+SC_MAIN_ENABLE=0
 
 scutclient_hotplug_load_option() {
 	local section="$1"
-	config_get_bool SC_ENABLED "$section" enable 0
+	config_get_bool SC_MAIN_ENABLE "$section" enable 0
 }
 
-scutclient_hotplug_match_interface() {
+scutclient_hotplug_restart_instance() {
 	local section="$1"
-	local interface="wan"
+	local enabled interface
+
+	config_get_bool enabled "$section" enabled 1
+	[ "$enabled" -eq 1 ] || return 0
 
 	config_get interface "$section" interface "wan"
 
-	[ "$interface" = "$INTERFACE" ] && SC_MATCHED=1
+	# 只重启绑定该 WAN 的实例，不影响其他已认证实例
+	[ "$interface" = "$INTERFACE" ] || return 0
+
+	logger -t scutclient \
+		"Interface '$INTERFACE' is up; restarting instance '$section'"
+
+	/etc/init.d/scutclient restart_instance "$section"
 }
 
 config_load scutclient
 config_foreach scutclient_hotplug_load_option option
 
-[ "$SC_ENABLED" -eq 1 ] || exit 0
+[ "$SC_MAIN_ENABLE" -eq 1 ] || exit 0
 
-config_foreach scutclient_hotplug_match_interface scutclient
+config_foreach scutclient_hotplug_restart_instance scutclient
 
-[ "$SC_MATCHED" -eq 1 ] || exit 0
-
-# procd interface trigger 正常时通常已经处理。
-# hotplug 只作为 fallback，不对已经运行的服务重复 restart。
-if /etc/init.d/scutclient running >/dev/null 2>&1; then
-	exit 0
-fi
-
-logger -t scutclient \
-	"Interface '$INTERFACE' is up; starting scutclient"
-
-/etc/init.d/scutclient start
+exit 0

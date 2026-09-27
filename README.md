@@ -44,6 +44,28 @@ The compiled ipk will be placed under **bin** directory.
 Select **scutclient** under **Network** tab and start building your firmware.
 
 # Usage
+
+Each authentication instance runs as one independent process:
+
+```text
+one instance = one account + one WAN + one Dr.COM session + one log file
+```
+
+On OpenWrt every `config scutclient '<id>'` section in `/etc/config/scutclient`
+is spawned as its own procd instance by `/etc/init.d/scutclient`, with its own
+log file under `/tmp/scutclient/<id>.log`. Single-instance commands:
+
+```sh
+/etc/init.d/scutclient start_instance  <id>
+/etc/init.d/scutclient stop_instance   <id>
+/etc/init.d/scutclient restart_instance <id>
+/etc/init.d/scutclient logoff_instance <id>
+```
+
+One WAN (logical interface, or the resolved Linux netdev) can only be bound by
+one instance; the init script refuses conflicting instances at start-up.
+
+### Command line
 ```bash
 scutclient --username <username> --password <password> [options...]
  -i, --iface <ifname> Interface to perform authentication.
@@ -55,8 +77,28 @@ scutclient --username <username> --password <password> [options...]
  -h, --hash <hash> DrAuthSvr.dll hash value.
  -E, --online-hook <command> Command to be execute after EAP authentication success.
  -Q, --offline-hook <command> Command to be execute when you are forced offline at nignt.
- -D, --debug
+     --heartbeat-interval <sec> Dr.com UDP heartbeat interval. Default 12.
+     --heartbeat-timeout <sec> Dr.com UDP heartbeat timeout. Default 2.
+     --eap-timeout <sec> 802.1X receive timeout. Default 1.
+     --eap-retries <times> 802.1X retry times. Default 3.
+     --expected-mac <mac> Abort if the interface MAC does not match.
+     --instance <id> Instance name written into every log line.
+     --log-level <error|warn|info|debug|trace> Log level. Default info.
+     --log-file <path|off> Per-instance log file. Default /tmp/scutclient.log.
+     --log-max-size <bytes> Rotate the log beyond this size. Default 262144.
+     --log-keep <n> Rotated log files to keep. Default 2.
+ -D, --debug [level] Enable debug output (numeric level 0-5).
  -o, --logoff
+```
+
+### MAC helper
+
+`/usr/lib/scutclient/scutclient-mac` manages per-instance MAC spoofing
+(keep / random / custom) on wired devices or wireless STA interfaces:
+
+```sh
+scutclient-mac apply <instance>   # apply configured MAC, print effective one
+scutclient-mac gen                # print a random locally administered MAC
 ```
 
 If any advice, open an issue or contact us at SCUT Router Group.
