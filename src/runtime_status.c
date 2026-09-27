@@ -9,10 +9,17 @@
 #define STATE_PATH_MAX (256)
 #define STATE_TMP_MAX (STATE_PATH_MAX + 8)
 
+#define STATE_EXTRA_MAX 8
+#define STATE_EXTRA_KEY 24
+#define STATE_EXTRA_VAL 64
+
 static char state_path[STATE_PATH_MAX] = {0};
 static char cur_state[32] = "";
 static char cur_detail[64] = "";
 static int state_enabled = 0;
+static char extra_key[STATE_EXTRA_MAX][STATE_EXTRA_KEY];
+static char extra_val[STATE_EXTRA_MAX][STATE_EXTRA_VAL];
+static int extra_count = 0;
 
 static int instance_name_valid(const char *instance) {
 	const char *p;
@@ -36,6 +43,7 @@ int RuntimeStatusInit(const char *instance) {
 	state_path[0] = 0;
 	cur_state[0] = 0;
 	cur_detail[0] = 0;
+	extra_count = 0;
 
 	if (!instance_name_valid(instance))
 		return -1;
@@ -76,6 +84,12 @@ static int write_state(const char *state, const char *detail, long heartbeat) {
 	if (heartbeat > 0)
 		fprintf(fp, "heartbeat=%ld\n", heartbeat);
 
+	{
+		int i;
+		for (i = 0; i < extra_count; i++)
+			fprintf(fp, "%s=%s\n", extra_key[i], extra_val[i]);
+	}
+
 	fflush(fp);
 	fclose(fp);
 
@@ -104,6 +118,33 @@ int RuntimeStatusSet(const char *state, const char *detail) {
 
 int RuntimeStatusHeartbeat(void) {
 	return write_state(cur_state, cur_detail, (long)time(NULL));
+}
+
+void RuntimeStatusSetField(const char *key, const char *value) {
+	int i;
+
+	if (!key || !key[0] || strlen(key) >= STATE_EXTRA_KEY)
+		return;
+
+	if (value && strlen(value) >= STATE_EXTRA_VAL)
+		return;
+
+	for (i = 0; i < extra_count; i++) {
+		if (!strcmp(extra_key[i], key)) {
+			snprintf(extra_val[i], sizeof(extra_val[i]),
+					"%s", value ? value : "");
+			return;
+		}
+	}
+
+	if (extra_count >= STATE_EXTRA_MAX)
+		return;
+
+	snprintf(extra_key[extra_count], sizeof(extra_key[extra_count]),
+			"%s", key);
+	snprintf(extra_val[extra_count], sizeof(extra_val[extra_count]),
+			"%s", value ? value : "");
+	extra_count++;
 }
 
 void RuntimeStatusClose(const char *final_state, const char *detail) {

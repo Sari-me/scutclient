@@ -48,6 +48,7 @@ static const struct option long_options[] = {
 	{"portal-page-index", required_argument, NULL, 1021},
 	{"portal-js-version", required_argument, NULL, 1022},
 	{"portal-r3", required_argument, NULL, 1023},
+	{"route-isolation", required_argument, NULL, 1024},
 	{"debug", optional_argument, NULL, 'D'},
 	{"logoff", no_argument, NULL, 'o'},
 	{NULL, no_argument, NULL, 0}
@@ -88,6 +89,7 @@ void PrintHelp(const char * argn) {
 		"     --portal-page-index <n> Dr.COM Web page index override.\n"
 		"     --portal-js-version <ver> Dr.COM Web jsVersion override. Default 4.1.3.\n"
 		"     --portal-r3 <value> Dr.COM Web R3 override.\n"
+		"     --route-isolation <native|mwan3> How the instance is launched.\n"
 		" -D, --debug [level] Enable debug output (numeric level 0-5).\n"
 		" -o, --logoff\n",
 		argn);
@@ -264,6 +266,9 @@ int main(int argc, char *argv[]) {
 		case 1023:
 			PortalR3 = optarg;
 			break;
+		case 1024:
+			RouteIsolation = optarg;
+			break;
 		case 'D':
 			if (optarg) {
 				tmpdbg = atoi(optarg);
@@ -332,6 +337,11 @@ int main(int argc, char *argv[]) {
 
 	RuntimeStatusInit(inst_name);
 	RuntimeStatusSet("starting", "process_started");
+	RuntimeStatusSetField("auth_method",
+			AuthMethod == AUTH_PORTAL ? "portal" : "dot1x");
+	RuntimeStatusSetField("device", DeviceName);
+	RuntimeStatusSetField("route_isolation",
+			RouteIsolation ? RouteIsolation : "native");
 
 	/* Portal 后端：在线检测 + 自动重登录主循环（--logoff 时只注销一次） */
 	if (AuthMethod == AUTH_PORTAL) {

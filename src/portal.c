@@ -192,6 +192,7 @@ static int portal_refresh_network(void) {
 			"%s", ipv4);
 	snprintf(PortalCtx.local_mac, sizeof(PortalCtx.local_mac),
 			"%s", mac);
+	RuntimeStatusSetField("source_ipv4", PortalCtx.source_ipv4);
 	return 0;
 }
 
@@ -368,6 +369,9 @@ static int PortalCheckStatus(PortalStatusInfo *st) {
 
 	memset(st, 0, sizeof(*st));
 
+	if (portal_refresh_network() != 0)
+		return -1;
+
 	if (PortalBuildKernelStatusURL(&PortalCtx.location, url, sizeof(url)) != 0)
 		return -1;
 
@@ -434,6 +438,9 @@ static int portal_login_drcom(char *msg, size_t msglen) {
 
 	portal_build_account(account, sizeof(account));
 
+	if (portal_refresh_network() != 0)
+		return -1;
+
 	if (PortalBuildDrcomLoginURL(&PortalCtx.location, &PortalCtx.drcom,
 			callback, 500 + (PortalCtx.request_seq * 37u) % 10000u,
 			account, Password ? Password : "",
@@ -494,6 +501,9 @@ static int portal_login_eportal(char *msg, size_t msglen) {
 	PortalHttpResponse response;
 
 	portal_build_account(account, sizeof(account));
+
+	if (portal_refresh_network() != 0)
+		return -1;
 
 	if (PortalBuildEportalLoginURL(&PortalCtx.location, &PortalCtx.cfg,
 			account, Password ? Password : "",
@@ -629,6 +639,10 @@ void PortalRun(void) {
 				"%s", PortalR3);
 
 	portal_curl_init();
+
+	RuntimeStatusSetField("portal_backend",
+			PortalLoginBackend == PORTAL_LOGIN_EPORTAL ?
+			"eportal" : "drcom");
 
 	LogWrite(DRCOM, INF,
 			"Portal: Location parsed, scheme=%s host=%s port=%u "

@@ -56,6 +56,9 @@ extern int PortalPageIndex;            /* Dr.COM Web page index override */
 extern const char *PortalJsVersion;    /* Dr.COM Web jsVersion override */
 extern const char *PortalR3;           /* Dr.COM Web R3 override */
 
+/* Route isolation resolved by the init script: "native" or "mwan3". */
+extern const char *RouteIsolation;
+
 /* Expected interface MAC (mac spoof verification). */
 extern unsigned char ExpectedMAC[6];
 extern int HaveExpectedMAC;

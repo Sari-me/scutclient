@@ -25,4 +25,11 @@ int RuntimeStatusHeartbeat(void);
 /* 写入终态后禁用模块（进程退出/被终止路径调用）。 */
 void RuntimeStatusClose(const char *final_state, const char *detail);
 
+/*
+ * 记录附加诊断字段（auth_method/device/source_ipv4/route_isolation/
+ * portal_backend 等），随每次状态写入一并落盘。
+ * 最多保留 8 组；value 截断到 63 字节。
+ */
+void RuntimeStatusSetField(const char *key, const char *value);
+
 #endif /* __RUNTIME_STATUS_H__ */

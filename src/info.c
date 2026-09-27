@@ -33,6 +33,7 @@ const char *PortalProgramIndex = NULL;
 int PortalPageIndex = 0;
 const char *PortalJsVersion = NULL;
 const char *PortalR3 = NULL;
+const char *RouteIsolation = "native";
 
 unsigned char ExpectedMAC[6] = { 0 };
 int HaveExpectedMAC = 0;

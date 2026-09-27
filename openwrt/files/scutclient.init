@@ -47,8 +47,7 @@ scutclient_resolve_device() {
 
 # 旧版配置（全局 config scutclient 'account' + config drcom 'settings'）
 # 迁移为单实例 config scutclient 'default'。config_version 防止重复迁移。
-# 只有迁移代码允许把旧单实例的 interface（如 wan）显式写入新实例。
-# v2 → v3：为既有实例补 auth_method=dot1x（向后兼容）。
+# v2 -> v3：补 auth_method=dot1x；v3 -> v4：补 route_isolation=auto。
 scutclient_migrate() {
 	local cv=""
 	local account_type=""
@@ -56,11 +55,11 @@ scutclient_migrate() {
 	cv="$(uci -q get "$CONFIG.main.config_version" 2>/dev/null)"
 
 	# 未知/更新版本：不动配置
-	if [ "$cv" != "" ] && [ "$cv" != "2" ] && [ "$cv" != "3" ]; then
+	if [ "$cv" != "" ] && [ "$cv" != "2" ] && [ "$cv" != "3" ] && [ "$cv" != "4" ]; then
 		return 0
 	fi
 
-	# Step 1: 旧版（无 config_version + 旧布局）→ v2
+	# Step 1: 旧版（无 config_version + 旧布局）-> v2
 	if [ -z "$cv" ]; then
 		account_type="$(uci -q show "$CONFIG" 2>/dev/null | \
 			grep -m1 "=scutclient$" | cut -d. -f2 | cut -d= -f1)"
@@ -114,8 +113,8 @@ scutclient_migrate() {
 		cv="2"
 	fi
 
-	# Step 2: v2 → v3：为既有实例补 auth_method=dot1x
-	if [ "$cv" != "3" ]; then
+	# Step 2: v2 -> v3：为既有实例补 auth_method=dot1x
+	if [ "$cv" != "3" ] && [ "$cv" != "4" ]; then
 		local sec
 		for sec in $(uci -q show "$CONFIG" 2>/dev/null | \
 				grep "=scutclient$" | cut -d. -f2 | cut -d= -f1); do
@@ -124,11 +123,35 @@ scutclient_migrate() {
 		done
 		uci -q set "$CONFIG.main.config_version=3"
 		uci -q commit "$CONFIG"
+		cv="3"
+	fi
+
+	# Step 3: v3 -> v4：为既有实例补 route_isolation=auto
+	if [ "$cv" != "4" ]; then
+		local sec
+		for sec in $(uci -q show "$CONFIG" 2>/dev/null | \
+				grep "=scutclient$" | cut -d. -f2 | cut -d= -f1); do
+			[ -n "$(uci -q get "$CONFIG.$sec.route_isolation" 2>/dev/null)" ] || \
+				uci -q set "$CONFIG.$sec.route_isolation=auto"
+		done
+		uci -q set "$CONFIG.main.config_version=4"
+		uci -q commit "$CONFIG"
 	fi
 }
 
 scutclient_instance_type() {
 	uci -q show "$CONFIG.$1" 2>/dev/null | head -n 1 | cut -d= -f2
+}
+
+scutclient_check_instance() {
+	local section="$1"
+
+	[ -n "$section" ] || return 1
+	[ "$(scutclient_instance_type "$section")" = "scutclient" ] || {
+		logger -t scutclient "No such scutclient instance: '$section'"
+		return 1
+	}
+	return 0
 }
 
 # ---- 一次启动流程内的共享状态 ----
@@ -203,8 +226,6 @@ scutclient_prepare_phase() {
 	config_get password "$section" password ""
 	config_get interface "$section" interface ""
 	config_get mac_mode "$section" mac_mode "keep"
-	config_get auth_method "$section" auth_method "dot1x"
-	config_get portal_location "$section" portal_location ""
 
 	[ -n "$username" ] || {
 		logger -t scutclient "Skip $section: username is empty"
@@ -221,17 +242,6 @@ scutclient_prepare_phase() {
 		logger -t scutclient "Skip $section: interface is empty"
 		return 1
 	}
-
-	if [ "$auth_method" = "portal" ]; then
-		case "$portal_location" in
-			http://*|https://*) ;;
-			*)
-				logger -t scutclient \
-					"Skip $section: portal Location is empty or invalid"
-				return 1
-				;;
-		esac
-	fi
 
 	WAIT_INTERFACES="$WAIT_INTERFACES $interface"
 
@@ -288,82 +298,246 @@ scutclient_apply_network() {
 	return 0
 }
 
+# mwan3 兼容层：仅使用官方 mwan3 use 机制，不在 C 中自造 fwmark
+scutclient_mwan3_available() {
+	[ -x /usr/sbin/mwan3 ] || return 1
+	[ -r /lib/mwan3/libwrap_mwan3_sockopt.so.1.0 ] || return 1
+	[ -x /etc/init.d/mwan3 ] || return 1
+	/etc/init.d/mwan3 running >/dev/null 2>&1 || return 1
+	return 0
+}
+
 # Phase B：只负责解析当前 netdev、复核独占与 MAC，并创建本实例进程。
 # 不生成 MAC、不改 network/wireless、不 reload 网络。
-scutclient_logoff_instance() {
+scutclient_start_instance() {
 	local section="$1"
-	local interface=""
-	local auth_method="dot1x"
-	local portal_location=""
+	local enabled name username password interface
+	local dns hostname server_auth_ip version hash
+	local nettime onlinehook offlinehook
+	local heartbeat_interval heartbeat_timeout eap_timeout eap_retries
+	local mac_mode macaddr expected_mac=""
+	local auth_method portal_location
+	local route_isolation="auto"
+	local use_mwan3=0
+	local log_level log_size log_keep log_system log_file
 	local ifname=""
 
-	config_get interface "$section" interface ""
-	config_get auth_method "$section" auth_method "dot1x"
-	config_get portal_location "$section" portal_location ""
+	config_get_bool enabled "$section" enabled 1
+	[ "$enabled" -eq 1 ] || return 0
 
-	[ -n "$interface" ] || {
-		logger -t scutclient \
-			"Unable to log off $section: interface is empty"
+	config_get name "$section" name "$section"
+	config_get username "$section" username ""
+	config_get password "$section" password ""
+	config_get interface "$section" interface ""
+
+	[ -n "$username" ] || {
+		logger -t scutclient "Skip $section: username is empty"
 		return 1
 	}
 
+	[ -n "$password" ] || {
+		logger -t scutclient "Skip $section: password is empty"
+		return 1
+	}
+
+	[ -n "$interface" ] || {
+		logger -t scutclient "Skip $section: interface is empty"
+		return 1
+	}
+
+	config_get dns "$section" dns "222.201.130.30"
+	config_get hostname "$section" hostname "Lenovo-PC"
+	config_get server_auth_ip "$section" server_auth_ip "202.38.210.131"
+	config_get version "$section" version "4472434f4d0096022a"
+	config_get hash "$section" hash "2ec15ad258aee9604b18f2f8114da38db16efd00"
+	config_get nettime "$section" nettime ""
+	config_get onlinehook "$section" onlinehook ""
+	config_get offlinehook "$section" offlinehook ""
+
+	config_get heartbeat_interval "$section" heartbeat_interval "12"
+	config_get heartbeat_timeout "$section" heartbeat_timeout "2"
+	config_get eap_timeout "$section" eap_timeout "1"
+	config_get eap_retries "$section" eap_retries "3"
+
+	config_get log_level "$section" log_level "info"
+	config_get log_size "$section" log_size "262144"
+	config_get log_keep "$section" log_keep "2"
+	config_get_bool log_system "$section" log_system 1
+	config_get_bool log_file "$section" log_file 1
+
+	# reload 之后重新解析真实 netdev（无线 STA 的 netdev 可能变化）
 	ifname="$(scutclient_resolve_device "$interface")"
 
 	[ -n "$ifname" ] || {
 		logger -t scutclient \
-			"Unable to log off: cannot resolve '$interface'"
+			"Skip $section: unable to resolve network interface '$interface'"
 		return 1
 	}
 
-	if [ "$auth_method" = "portal" ]; then
-		case "$portal_location" in
-			http://*|https://*)
-				"$PROG" --iface "$ifname" --auth-method portal \
-					--portal-location "$portal_location" --logoff
-				return 0
-				;;
-			*)
-				logger -t scutclient \
-					"Unable to log off $section: portal Location is empty or invalid"
-				return 1
-				;;
-		esac
+	scutclient_check_exclusive "$interface" "$ifname" "$section" || return 1
+
+	config_get mac_mode "$section" mac_mode "keep"
+	if [ "$mac_mode" != "keep" ]; then
+		"$MAC_HELPER" verify "$section" >/dev/null || {
+			logger -t scutclient \
+				"Skip $section: configured MAC is not applied to '$ifname'"
+			return 1
+		}
+		expected_mac="$(uci -q get "$CONFIG.$section.macaddr" 2>/dev/null)"
 	fi
 
-	"$PROG" --iface "$ifname" --logoff
-}
+	# 路由隔离：auto=mwan3 可用则经 mwan3 use 启动，否则 native。
+	# mwan3 use 解析 DEVICE/SRCIP/FWMARK 并经 wrapper 库固定出口，
+	# 避免认证流量再被 mwan3 policy routing 改写（官方机制，无自造 fwmark）。
+	config_get route_isolation "$section" route_isolation "auto"
 
-logoff() {
-	config_load "$CONFIG"
-	config_foreach scutclient_logoff_instance scutclient
-}
+	case "$route_isolation" in
+		native)
+			;;
+		mwan3)
+			if scutclient_mwan3_available; then
+				use_mwan3=1
+			else
+				logger -t scutclient \
+					"Skip $section: route_isolation=mwan3 but mwan3 is not running"
+				return 1
+			fi
+			;;
+		*)
+			if scutclient_mwan3_available; then
+				use_mwan3=1
+				route_isolation="mwan3"
+			else
+				route_isolation="native"
+			fi
+			;;
+	esac
 
-scutclient_check_instance() {
-	local section="$1"
+	logger -t scutclient \
+		"Starting $section on logical interface '$interface' ($ifname), route isolation: mode=$route_isolation"
 
-	[ -n "$section" ] || return 1
-	[ "$(scutclient_instance_type "$section")" = "scutclient" ] || {
-		logger -t scutclient "No such scutclient instance: '$section'"
-		return 1
+	procd_open_instance "$section"
+
+	if [ "$use_mwan3" -eq 1 ]; then
+		procd_set_param command /usr/sbin/mwan3 use "$interface" "$PROG"
+	else
+		procd_set_param command "$PROG"
+	fi
+
+	# 公共参数（两种认证方式都需要）
+	procd_append_param command \
+		--username "$username" \
+		--password "$password" \
+		--iface "$ifname" \
+		--instance "$section" \
+		--route-isolation "$route_isolation"
+
+	[ -n "$expected_mac" ] && \
+		procd_append_param command --expected-mac "$expected_mac"
+
+	[ -n "$onlinehook" ] && \
+		procd_append_param command --online-hook "$onlinehook"
+
+	[ -n "$offlinehook" ] && \
+		procd_append_param command --offline-hook "$offlinehook"
+
+	procd_append_param command \
+		--log-level "$log_level" \
+		--log-max-size "$log_size" \
+		--log-keep "$log_keep"
+
+	[ "$log_file" -eq 1 ] && \
+		procd_append_param command --log-file "/tmp/scutclient/$section.log"
+
+	# 按实例分发认证方式；dot1x 专属参数不允许传给 Portal 实例，反之亦然
+	if [ "$auth_method" = "portal" ]; then
+		local portal_suffix portal_connect_timeout portal_timeout
+		local portal_check_interval portal_tls_verify
+		local portal_http_port portal_https_port
+		local portal_login_mode portal_program_index portal_page_index
+		local portal_js_version portal_r3
+
+		config_get portal_suffix "$section" portal_suffix ""
+		config_get portal_connect_timeout "$section" portal_connect_timeout "5"
+		config_get portal_timeout "$section" portal_timeout "10"
+		config_get portal_check_interval "$section" portal_check_interval "15"
+		config_get_bool portal_tls_verify "$section" portal_tls_verify 1
+		config_get portal_http_port "$section" portal_http_port "801"
+		config_get portal_https_port "$section" portal_https_port "802"
+		config_get portal_login_mode "$section" portal_protocol "auto"
+		config_get portal_program_index "$section" portal_program_index ""
+		config_get portal_page_index "$section" portal_page_index ""
+		config_get portal_js_version "$section" portal_js_version ""
+		config_get portal_r3 "$section" portal_r3 ""
+
+		procd_append_param command \
+			--auth-method portal \
+			--portal-location "$portal_location" \
+			--portal-connect-timeout "$portal_connect_timeout" \
+			--portal-timeout "$portal_timeout" \
+			--portal-check-interval "$portal_check_interval" \
+			--portal-tls-verify "$portal_tls_verify" \
+			--portal-http-port "$portal_http_port" \
+			--portal-https-port "$portal_https_port" \
+			--portal-login-mode "$portal_login_mode"
+
+		[ -n "$portal_suffix" ] && \
+			procd_append_param command --portal-suffix "$portal_suffix"
+
+		# 页面运行时数据 override：留空不传
+		[ -n "$portal_program_index" ] && \
+			procd_append_param command --portal-program-index "$portal_program_index"
+		[ -n "$portal_page_index" ] && \
+			procd_append_param command --portal-page-index "$portal_page_index"
+		[ -n "$portal_js_version" ] && \
+			procd_append_param command --portal-js-version "$portal_js_version"
+		[ -n "$portal_r3" ] && \
+			procd_append_param command --portal-r3 "$portal_r3"
+	else
+		procd_append_param command --auth-method dot1x
+		procd_append_param command \
+			--dns "$dns" \
+			--hostname "$hostname" \
+			--udp-server "$server_auth_ip"
+
+		[ -n "$version" ] && \
+			procd_append_param command --cli-version "$version"
+
+		[ -n "$hash" ] && \
+			procd_append_param command --hash "$hash"
+
+		[ -n "$nettime" ] && \
+			procd_append_param command --net-time "$nettime"
+
+		procd_append_param command \
+			--heartbeat-interval "$heartbeat_interval" \
+			--heartbeat-timeout "$heartbeat_timeout" \
+			--eap-timeout "$eap_timeout" \
+			--eap-retries "$eap_retries"
+	fi
+
+	procd_set_param netdev "$ifname"
+
+	# system log 由 procd 接管 stdout/stderr
+	[ "$log_system" -eq 1 ] && {
+		procd_set_param stdout 1
+		procd_set_param stderr 1
 	}
-	return 0
+
+	procd_close_instance
 }
 
-start_instance() {
+scutclient_start_single() {
 	local section="$1"
 	local interface="" mac_mode result=""
 
-	scutclient_check_instance "$section" || return 1
-
-	config_load "$CONFIG"
-
-	# 单实例启动同样走 prepare ->（必要时一次 reload）-> spawn
 	config_get interface "$section" interface ""
 	[ -n "$interface" ] || {
 		logger -t scutclient "Skip $section: interface is empty"
 		return 1
 	}
 
+	# 单实例启动同样走 prepare ->（必要时一次 reload）-> spawn
 	WAIT_INTERFACES="$interface"
 	APPLY_NETWORK=0
 	APPLY_WIRELESS=0
@@ -390,30 +564,114 @@ start_instance() {
 	scutclient_start_instance "$section"
 }
 
-stop_instance() {
-	local section="$1"
+start_service() {
+	local instance="$1"
 
-	scutclient_check_instance "$section" || return 1
-
-	procd_kill "$CONFIG" "$section"
-}
-
-restart_instance() {
-	local section="$1"
-
-	scutclient_check_instance "$section" || return 1
-
-	stop_instance "$section"
-	# 等待旧进程完成 EAPOL logoff，避免同 MAC 会话冲突
-	sleep 1
-	start_instance "$section"
-}
-
-logoff_instance() {
-	local section="$1"
-
-	scutclient_check_instance "$section" || return 1
+	scutclient_migrate
 
 	config_load "$CONFIG"
-	scutclient_logoff_instance "$section"
+
+	local enable=0
+	config_get_bool enable "main" enable 0
+
+	[ "$enable" -eq 1 ] || {
+		logger -t scutclient "Service disabled by UCI"
+		return 0
+	}
+
+	if [ -n "$instance" ]; then
+		# start <id>：rc_procd 以 method=add 提交，其他实例不受影响
+		scutclient_start_single "$instance"
+		return 0
+	fi
+
+	# Phase A：字段校验 + 全部实例 MAC prepare（无 reload）
+	USED_NETWORKS=""
+	USED_DEVICES=""
+	WAIT_INTERFACES=""
+	APPLY_NETWORK=0
+	APPLY_WIRELESS=0
+	config_foreach scutclient_prepare_phase scutclient
+
+	# 网络配置最多 reload 一次，随后等待所有 WAN 恢复
+	scutclient_apply_network
+
+	# Phase B：reload 后重新解析，logical + netdev 唯一性在此复核
+	USED_NETWORKS=""
+	USED_DEVICES=""
+	config_foreach scutclient_collect_usage scutclient
+
+	config_foreach scutclient_start_instance scutclient
+}
+
+service_triggers() {
+	# 接口热插拔由 hotplug 按实例处理（ifup/ifdown/ifupdate），
+	# 这里不再注册整服务级别的 interface trigger。
+	procd_add_reload_trigger "$CONFIG"
+	procd_add_reload_trigger network
+}
+
+reload_service() {
+	stop
+	start
+}
+
+scutclient_logoff_instance() {
+	local section="$1"
+	local interface=""
+	local auth_method="dot1x"
+	local portal_location=""
+	local route_isolation="auto"
+	local ifname=""
+	local prefix=""
+
+	config_get interface "$section" interface ""
+	config_get auth_method "$section" auth_method "dot1x"
+	config_get portal_location "$section" portal_location ""
+	config_get route_isolation "$section" route_isolation "auto"
+
+	[ -n "$interface" ] || {
+		logger -t scutclient \
+			"Unable to log off $section: interface is empty"
+		return 1
+	}
+
+	# 保持与运行实例相同的 route isolation
+	case "$route_isolation" in
+		mwan3|auto)
+			if scutclient_mwan3_available; then
+				prefix="/usr/sbin/mwan3 use $interface"
+			fi
+			;;
+	esac
+
+	ifname="$(scutclient_resolve_device "$interface")"
+
+	[ -n "$ifname" ] || {
+		logger -t scutclient \
+			"Unable to log off: cannot resolve '$interface'"
+		return 1
+	}
+
+	if [ "$auth_method" = "portal" ]; then
+		case "$portal_location" in
+			http://*|https://*)
+				$prefix "$PROG" --iface "$ifname" --auth-method portal \
+					--portal-location "$portal_location" --logoff
+				return 0
+				;;
+			*)
+				logger -t scutclient \
+					"Unable to log off $section: portal Location is empty or invalid"
+				return 1
+				;;
+		esac
+	fi
+
+	$prefix "$PROG" --iface "$ifname" --logoff
+}
+
+logoff() {
+	config_load "$CONFIG"
+	config_foreach scutclient_logoff_instance scutclient
 }
