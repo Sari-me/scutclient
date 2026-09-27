@@ -32,8 +32,8 @@ static uint8_t MultcastHeader[14] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
 static uint8_t UnicastHeader[14] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
 		0xd0, 0xf8, 0x00, 0x00, 0x03, 0x88, 0x8e };
 static time_t BaseHeartbeatTime = 0;  // UDP心跳基线时间
-static int auth_8021x_sock = 0; // 8021x的socket描述符
-static int auth_udp_sock = 0; // udp的socket描述符
+static int auth_8021x_sock = -1; // 8021x的socket描述符（-1 表示未创建）
+static int auth_udp_sock = -1; // udp的socket描述符（-1 表示未创建）
 static uint8_t lastHBDone = 1;	// 记录上次心跳是否成功结束，没有的话重拨
 struct sockaddr_ll auth_8021x_addr;
 
@@ -160,6 +160,7 @@ int auth_8021x_Init() {
 
 ERR:
 	close(auth_8021x_sock);
+	auth_8021x_sock = -1;
 	return ret;
 }
 
@@ -174,6 +175,10 @@ int auth_8021x_Logoff() {
 	uint8_t LogoffCnt = 2;	// 发送两次
 	int ret = 0;
 
+	if (auth_8021x_sock < 0) {
+		LogWrite(DOT1X, WARN, "Client: no active 802.1X socket, skip logoff.");
+		return 0;
+	}
 	LogWrite(DOT1X, INF, "Client: Send Logoff.");
 	// 客户端发送Logoff后，接收服务器回复
 	while (LogoffCnt--) {
@@ -222,6 +227,7 @@ int auth_UDP_Init() {
 			sizeof(on))) < 0) {
 		LogWrite(DRCOM, ERROR, "UDP setsockopt failed: %s", strerror(errno));
 		close(auth_udp_sock);
+		auth_udp_sock = -1;
 		return -1;
 	}
 
@@ -229,6 +235,7 @@ int auth_UDP_Init() {
 			strlen(DeviceName))) < 0) {
 		LogWrite(DRCOM, ERROR, "Bind UDP socket to device failed: %s", strerror(errno));
 		close(auth_udp_sock);
+		auth_udp_sock = -1;
 		return -1;
 	}
 
@@ -248,6 +255,7 @@ int auth_UDP_Init() {
 			sizeof(local_addr)) < 0) {
 		LogWrite(DRCOM, ERROR, "Bind UDP socket to IP failed: %s", strerror(errno));
 		close(auth_udp_sock);
+		auth_udp_sock = -1;
 		return -1;
 	}
 
@@ -431,6 +439,7 @@ int Authentication(int client) {
 	ret = auth_8021x_Logoff();
 	if (client == LOGOFF) {
 		close(auth_8021x_sock);
+		auth_8021x_sock = -1;
 		return 0;
 	}
 
@@ -519,9 +528,11 @@ int Authentication(int client) {
 	lastHBDone = 1;
 ERR2:
 	close(auth_udp_sock);
+	auth_udp_sock = -1;
 	auth_8021x_Logoff();
 ERR1:
 	close(auth_8021x_sock);
+	auth_8021x_sock = -1;
 	return ret;
 }
 
