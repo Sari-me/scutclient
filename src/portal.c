@@ -36,6 +36,7 @@
 #define PORTAL_VALUE_MAX 128
 
 static char portal_host[PORTAL_HOST_MAX] = "";
+static int  portal_tls = 0;
 static int  curl_ready = 0;
 
 /* ---------------- JSON / JSONP 最小解析 ---------------- */
@@ -145,6 +146,8 @@ static int portal_parse_host(const char *location) {
 
 	memcpy(portal_host, p, n);
 	portal_host[n] = 0;
+
+	portal_tls = (strncmp(location, "https://", 8) == 0);
 	return 0;
 }
 
