@@ -33,6 +33,8 @@ static const struct option long_options[] = {
 	{"log-file", required_argument, NULL, 1007},
 	{"log-max-size", required_argument, NULL, 1008},
 	{"log-keep", required_argument, NULL, 1009},
+	{"auth-method", required_argument, NULL, 1010},
+	{"portal-location", required_argument, NULL, 1011},
 	{"debug", optional_argument, NULL, 'D'},
 	{"logoff", no_argument, NULL, 'o'},
 	{NULL, no_argument, NULL, 0}
@@ -59,6 +61,8 @@ void PrintHelp(const char * argn) {
 		"     --log-file <path|off> Per-instance log file. Default /tmp/scutclient.log.\n"
 		"     --log-max-size <bytes> Rotate the log beyond this size. Default 262144.\n"
 		"     --log-keep <n> Rotated log files to keep. Default 2.\n"
+		"     --auth-method <dot1x|portal> Authentication method. Default dot1x.\n"
+		"     --portal-location <url> Captive portal Location URL (portal mode).\n"
 		" -D, --debug [level] Enable debug output (numeric level 0-5).\n"
 		" -o, --logoff\n",
 		argn);
@@ -172,6 +176,19 @@ int main(int argc, char *argv[]) {
 		case 1009:
 			logkeep = atoi(optarg);
 			break;
+		case 1010:
+			if (!strcmp(optarg, "dot1x")) {
+				AuthMethod = AUTH_DOT1X;
+			} else if (!strcmp(optarg, "portal")) {
+				AuthMethod = AUTH_PORTAL;
+			} else {
+				LogWrite(INIT, ERROR, "Invalid auth method '%s'!", optarg);
+				exit(-1);
+			}
+			break;
+		case 1011:
+			PortalLocation = optarg;
+			break;
 		case 'D':
 			if (optarg) {
 				tmpdbg = atoi(optarg);
@@ -240,6 +257,24 @@ int main(int argc, char *argv[]) {
 
 	RuntimeStatusInit(inst_name);
 	RuntimeStatusSet("starting", "process_started");
+
+	/* Portal 后端尚未实现：显式报错退出，避免静默按 802.1X 认证 */
+	if (AuthMethod == AUTH_PORTAL) {
+		if (!PortalLocation || strncmp(PortalLocation, "http://", 7) != 0) {
+			if (!PortalLocation || strncmp(PortalLocation, "https://", 8) != 0) {
+				RuntimeStatusSet("error", "portal_location_invalid");
+				LogWrite(INIT, ERROR,
+						"Portal authentication requires a http(s):// Location!");
+				LogClose();
+				exit(-1);
+			}
+		}
+		RuntimeStatusSet("error", "portal_not_implemented");
+		LogWrite(INIT, ERROR,
+				"Portal authentication backend is not implemented in this build yet!");
+		LogClose();
+		exit(-1);
+	}
 
 	LogWrite(ALL, INF, "scutclient built at: " __DATE__ " " __TIME__);
 	LogWrite(ALL, INF, "Authored by Scutclient Project");

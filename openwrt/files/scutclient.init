@@ -49,67 +49,83 @@ scutclient_resolve_device() {
 # 旧版配置（全局 config scutclient 'account' + config drcom 'settings'）
 # 迁移为单实例 config scutclient 'default'。config_version 防止重复迁移。
 # 只有迁移代码允许把旧单实例的 interface（如 wan）显式写入新实例。
+# v2 → v3：为既有实例补 auth_method=dot1x（向后兼容）。
 scutclient_migrate() {
 	local cv=""
 	local account_type=""
 
 	cv="$(uci -q get "$CONFIG.main.config_version" 2>/dev/null)"
-	[ "$cv" = "2" ] && return 0
 
-	# 判断是否存在旧版账号节（存在任意 scutclient 类型节时才需要迁移）；
-	# drcom 节存在而 config_version 缺失，视为旧布局。
-	account_type="$(uci -q show "$CONFIG" 2>/dev/null | \
-		grep -m1 "=scutclient$" | cut -d. -f2 | cut -d= -f1)"
-
-	if [ -z "$account_type" ]; then
-		uci -q set "$CONFIG.main.config_version=2"
-		uci -q commit "$CONFIG"
+	# 未知/更新版本：不动配置
+	if [ "$cv" != "" ] && [ "$cv" != "2" ] && [ "$cv" != "3" ]; then
 		return 0
 	fi
 
-	local username password interface
-	local dns hostname server_auth_ip version hash
-	local nettime onlinehook offlinehook debug enable
+	# Step 1: 旧版（无 config_version + 旧布局）→ v2
+	if [ -z "$cv" ]; then
+		account_type="$(uci -q show "$CONFIG" 2>/dev/null | \
+			grep -m1 "=scutclient$" | cut -d. -f2 | cut -d= -f1)"
 
-	username="$(uci -q get "$CONFIG.$account_type.username" 2>/dev/null)"
-	password="$(uci -q get "$CONFIG.$account_type.password" 2>/dev/null)"
-	interface="$(uci -q get "$CONFIG.$account_type.interface" 2>/dev/null)"
+		if [ -n "$account_type" ]; then
+			local username password interface
+			local dns hostname server_auth_ip version hash
+			local nettime onlinehook offlinehook debug enable
 
-	dns="$(uci -q get "$CONFIG.settings.dns" 2>/dev/null)"
-	hostname="$(uci -q get "$CONFIG.settings.hostname" 2>/dev/null)"
-	server_auth_ip="$(uci -q get "$CONFIG.settings.server_auth_ip" 2>/dev/null)"
-	version="$(uci -q get "$CONFIG.settings.version" 2>/dev/null)"
-	hash="$(uci -q get "$CONFIG.settings.hash" 2>/dev/null)"
-	nettime="$(uci -q get "$CONFIG.settings.nettime" 2>/dev/null)"
-	onlinehook="$(uci -q get "$CONFIG.settings.onlinehook" 2>/dev/null)"
-	offlinehook="$(uci -q get "$CONFIG.settings.offlinehook" 2>/dev/null)"
+			username="$(uci -q get "$CONFIG.$account_type.username" 2>/dev/null)"
+			password="$(uci -q get "$CONFIG.$account_type.password" 2>/dev/null)"
+			interface="$(uci -q get "$CONFIG.$account_type.interface" 2>/dev/null)"
 
-	debug="$(uci -q get "$CONFIG.main.debug" 2>/dev/null)"
-	enable="$(uci -q get "$CONFIG.main.enable" 2>/dev/null)"
+			dns="$(uci -q get "$CONFIG.settings.dns" 2>/dev/null)"
+			hostname="$(uci -q get "$CONFIG.settings.hostname" 2>/dev/null)"
+			server_auth_ip="$(uci -q get "$CONFIG.settings.server_auth_ip" 2>/dev/null)"
+			version="$(uci -q get "$CONFIG.settings.version" 2>/dev/null)"
+			hash="$(uci -q get "$CONFIG.settings.hash" 2>/dev/null)"
+			nettime="$(uci -q get "$CONFIG.settings.nettime" 2>/dev/null)"
+			onlinehook="$(uci -q get "$CONFIG.settings.onlinehook" 2>/dev/null)"
+			offlinehook="$(uci -q get "$CONFIG.settings.offlinehook" 2>/dev/null)"
 
-	uci -q set "$CONFIG.default=scutclient"
-	uci -q set "$CONFIG.default.enabled=1"
-	uci -q set "$CONFIG.default.name=WAN"
-	[ -n "$username" ] && uci -q set "$CONFIG.default.username=$username"
-	[ -n "$password" ] && uci -q set "$CONFIG.default.password=$password"
-	[ -n "$interface" ] && uci -q set "$CONFIG.default.interface=$interface"
-	[ -n "$server_auth_ip" ] && uci -q set "$CONFIG.default.server_auth_ip=$server_auth_ip"
-	[ -n "$dns" ] && uci -q set "$CONFIG.default.dns=$dns"
-	[ -n "$hostname" ] && uci -q set "$CONFIG.default.hostname=$hostname"
-	[ -n "$version" ] && uci -q set "$CONFIG.default.version=$version"
-	[ -n "$hash" ] && uci -q set "$CONFIG.default.hash=$hash"
-	[ -n "$nettime" ] && uci -q set "$CONFIG.default.nettime=$nettime"
-	[ -n "$onlinehook" ] && uci -q set "$CONFIG.default.onlinehook=$onlinehook"
-	[ -n "$offlinehook" ] && uci -q set "$CONFIG.default.offlinehook=$offlinehook"
-	[ "$debug" = "1" ] && uci -q set "$CONFIG.default.log_level=debug"
+			debug="$(uci -q get "$CONFIG.main.debug" 2>/dev/null)"
+			enable="$(uci -q get "$CONFIG.main.enable" 2>/dev/null)"
 
-	uci -q delete "$CONFIG.settings" 2>/dev/null
-	uci -q delete "$CONFIG.$account_type" 2>/dev/null
-	uci -q set "$CONFIG.main.enable=${enable:-0}"
-	uci -q set "$CONFIG.main.config_version=2"
-	uci -q commit "$CONFIG"
+			uci -q set "$CONFIG.default=scutclient"
+			uci -q set "$CONFIG.default.enabled=1"
+			uci -q set "$CONFIG.default.name=WAN"
+			[ -n "$username" ] && uci -q set "$CONFIG.default.username=$username"
+			[ -n "$password" ] && uci -q set "$CONFIG.default.password=$password"
+			[ -n "$interface" ] && uci -q set "$CONFIG.default.interface=$interface"
+			[ -n "$server_auth_ip" ] && uci -q set "$CONFIG.default.server_auth_ip=$server_auth_ip"
+			[ -n "$dns" ] && uci -q set "$CONFIG.default.dns=$dns"
+			[ -n "$hostname" ] && uci -q set "$CONFIG.default.hostname=$hostname"
+			[ -n "$version" ] && uci -q set "$CONFIG.default.version=$version"
+			[ -n "$hash" ] && uci -q set "$CONFIG.default.hash=$hash"
+			[ -n "$nettime" ] && uci -q set "$CONFIG.default.nettime=$nettime"
+			[ -n "$onlinehook" ] && uci -q set "$CONFIG.default.onlinehook=$onlinehook"
+			[ -n "$offlinehook" ] && uci -q set "$CONFIG.default.offlinehook=$offlinehook"
+			[ "$debug" = "1" ] && uci -q set "$CONFIG.default.log_level=debug"
 
-	logger -t scutclient "Migrated legacy configuration to instance 'default'"
+			uci -q delete "$CONFIG.settings" 2>/dev/null
+			uci -q delete "$CONFIG.$account_type" 2>/dev/null
+			uci -q set "$CONFIG.main.enable=${enable:-0}"
+
+			logger -t scutclient "Migrated legacy configuration to instance 'default'"
+		fi
+
+		uci -q set "$CONFIG.main.config_version=2"
+		uci -q commit "$CONFIG"
+		cv="2"
+	fi
+
+	# Step 2: v2 → v3：为既有实例补 auth_method=dot1x
+	if [ "$cv" != "3" ]; then
+		local sec
+		for sec in $(uci -q show "$CONFIG" 2>/dev/null | \
+				grep "=scutclient$" | cut -d. -f2 | cut -d= -f1); do
+			[ -n "$(uci -q get "$CONFIG.$sec.auth_method" 2>/dev/null)" ] || \
+				uci -q set "$CONFIG.$sec.auth_method=dot1x"
+		done
+		uci -q set "$CONFIG.main.config_version=3"
+		uci -q commit "$CONFIG"
+	fi
 }
 
 scutclient_instance_type() {
@@ -188,6 +204,8 @@ scutclient_prepare_phase() {
 	config_get password "$section" password ""
 	config_get interface "$section" interface ""
 	config_get mac_mode "$section" mac_mode "keep"
+	config_get auth_method "$section" auth_method "dot1x"
+	config_get portal_location "$section" portal_location ""
 
 	[ -n "$username" ] || {
 		logger -t scutclient "Skip $section: username is empty"
@@ -204,6 +222,17 @@ scutclient_prepare_phase() {
 		logger -t scutclient "Skip $section: interface is empty"
 		return 1
 	}
+
+	if [ "$auth_method" = "portal" ]; then
+		case "$portal_location" in
+			http://*|https://*) ;;
+			*)
+				logger -t scutclient \
+					"Skip $section: portal Location is empty or invalid"
+				return 1
+				;;
+		esac
+	fi
 
 	WAIT_INTERFACES="$WAIT_INTERFACES $interface"
 
@@ -269,6 +298,7 @@ scutclient_start_instance() {
 	local nettime onlinehook offlinehook
 	local heartbeat_interval heartbeat_timeout eap_timeout eap_retries
 	local mac_mode macaddr expected_mac=""
+	local auth_method portal_location
 	local log_level log_size log_keep log_system log_file
 	local ifname=""
 
@@ -336,6 +366,10 @@ scutclient_start_instance() {
 		expected_mac="$(uci -q get "$CONFIG.$section.macaddr" 2>/dev/null)"
 	fi
 
+	# portal 实例的 Location 在 Phase A 已校验，这里按实例分发认证方式
+	config_get auth_method "$section" auth_method "dot1x"
+	config_get portal_location "$section" portal_location ""
+
 	logger -t scutclient \
 		"Starting $section on logical interface '$interface' ($ifname)"
 
@@ -380,6 +414,15 @@ scutclient_start_instance() {
 		--log-level "$log_level" \
 		--log-max-size "$log_size" \
 		--log-keep "$log_keep"
+
+	# 按实例分发认证方式；portal 的 Location 已在前面校验过
+	if [ "$auth_method" = "portal" ]; then
+		procd_append_param command \
+			--auth-method portal \
+			--portal-location "$portal_location"
+	else
+		procd_append_param command --auth-method dot1x
+	fi
 
 	[ "$log_file" -eq 1 ] && \
 		procd_append_param command --log-file "/tmp/scutclient/$section.log"

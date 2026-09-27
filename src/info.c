@@ -18,6 +18,9 @@ int HBTimeout = 2;
 int EAPTimeout = 1;
 int EAPRetries = 3;
 
+int AuthMethod = AUTH_DOT1X;
+const char *PortalLocation = NULL;
+
 unsigned char ExpectedMAC[6] = { 0 };
 int HaveExpectedMAC = 0;
 

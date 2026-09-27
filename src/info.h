@@ -33,6 +33,12 @@ extern int HBTimeout;    /* Dr.com UDP heartbeat timeout, seconds */
 extern int EAPTimeout;   /* 802.1X receive timeout, seconds */
 extern int EAPRetries;   /* 802.1X retry times */
 
+/* Authentication method of this instance. */
+#define AUTH_DOT1X  0
+#define AUTH_PORTAL 1
+extern int AuthMethod;            /* AUTH_DOT1X or AUTH_PORTAL */
+extern const char *PortalLocation; /* full captive portal Location URL */
+
 /* Expected interface MAC (mac spoof verification). */
 extern unsigned char ExpectedMAC[6];
 extern int HaveExpectedMAC;

@@ -95,9 +95,17 @@ scutclient --username <username> --password <password> [options...]
      --log-file <path|off> Per-instance log file. Default /tmp/scutclient.log.
      --log-max-size <bytes> Rotate the log beyond this size. Default 262144.
      --log-keep <n> Rotated log files to keep. Default 2.
+     --auth-method <dot1x|portal> Authentication method. Default dot1x.
+     --portal-location <url> Captive portal Location URL (portal mode).
  -D, --debug [level] Enable debug output (numeric level 0-5).
  -o, --logoff
 ```
+
+`--auth-method portal` selects the Web Portal backend (captive portal
+login through the saved Location); the portal backend itself is not part
+of this build yet — the daemon rejects portal instances with a clear
+error until it lands. Every other option belongs to the 802.1X + Dr.COM
+backend.
 
 ### MAC helper
 
@@ -110,6 +118,15 @@ scutclient-mac gen                 # print a random locally administered MAC
 scutclient-mac prepare <instance>  # persist MAC into network/wireless UCI,
                                    # print: none | network | wireless
 scutclient-mac verify <instance>   # resolve current netdev and compare MACs
+```
+
+`/usr/lib/scutclient/scutclient-portal-probe` detects a captive portal on a
+real netdev (used by the LuCI "Detect Location" button; it never follows
+redirects and never changes any state):
+
+```sh
+scutclient-portal-probe <netdev>   # GET generate_204 via that device,
+                                   # print http_code= and location=
 ```
 
 If any advice, open an issue or contact us at SCUT Router Group.
