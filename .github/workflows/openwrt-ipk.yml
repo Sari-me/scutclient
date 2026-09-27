@@ -69,6 +69,28 @@ jobs:
 
           grep -q '^PKG_NAME:=scutclient$' openwrt/Makefile
 
+      - name: Consistency checks
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          # init / README 传给 C 程序的 CLI 必须真实存在于 main.c
+          for opt in instance expected-mac heartbeat-interval \
+                     heartbeat-timeout eap-timeout eap-retries \
+                     log-level log-file log-max-size log-keep; do
+            grep -q -- "\"$opt\"" src/main.c || {
+              echo "Missing CLI option: --$opt"
+              exit 1
+            }
+          done
+
+          # MAC helper 必须打包进 ipk
+          grep -q 'scutclient-mac' openwrt/Makefile
+
+          sh -n openwrt/files/scutclient.init
+          sh -n openwrt/files/scutclient.hotplug
+          sh -n openwrt/files/scutclient-mac
+
       - name: Prepare OpenWrt feed
         shell: bash
         run: |
