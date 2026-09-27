@@ -1,7 +1,15 @@
 #!/bin/sh
 
-[ "$ACTION" = "ifup" ] || exit 0
 [ -n "$INTERFACE" ] || exit 0
+
+case "$ACTION" in
+	ifup|ifdown) ;;
+	*) exit 0 ;;
+esac
+
+# MAC 应用期间（network/wifi reload 等待 WAN 恢复时）hotplug 不动作，
+# 避免 reload -> ifup -> restart -> 再 reload 的循环。
+[ -e /var/run/scutclient-network-apply.lock ] && exit 0
 
 . /lib/functions.sh
 
@@ -12,22 +20,31 @@ scutclient_hotplug_load_option() {
 	config_get_bool SC_MAIN_ENABLE "$section" enable 0
 }
 
-scutclient_hotplug_restart_instance() {
+scutclient_hotplug_handle() {
 	local section="$1"
 	local enabled interface
 
 	config_get_bool enabled "$section" enabled 1
 	[ "$enabled" -eq 1 ] || return 0
 
-	config_get interface "$section" interface "wan"
+	config_get interface "$section" interface ""
+	[ -n "$interface" ] || return 0
 
-	# 只重启绑定该 WAN 的实例，不影响其他已认证实例
+	# 只处理绑定该 WAN 的实例，不影响其他已认证实例
 	[ "$interface" = "$INTERFACE" ] || return 0
 
-	logger -t scutclient \
-		"Interface '$INTERFACE' is up; restarting instance '$section'"
-
-	/etc/init.d/scutclient restart_instance "$section"
+	case "$ACTION" in
+		ifup)
+			logger -t scutclient \
+				"Interface '$INTERFACE' is up; restarting instance '$section'"
+			/etc/init.d/scutclient restart_instance "$section"
+			;;
+		ifdown)
+			logger -t scutclient \
+				"Interface '$INTERFACE' is down; stopping instance '$section'"
+			/etc/init.d/scutclient stop_instance "$section"
+			;;
+	esac
 }
 
 config_load scutclient
@@ -35,6 +52,6 @@ config_foreach scutclient_hotplug_load_option option
 
 [ "$SC_MAIN_ENABLE" -eq 1 ] || exit 0
 
-config_foreach scutclient_hotplug_restart_instance scutclient
+config_foreach scutclient_hotplug_handle scutclient
 
 exit 0
