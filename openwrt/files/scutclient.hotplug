@@ -37,12 +37,12 @@ scutclient_hotplug_handle() {
 		ifup)
 			logger -t scutclient \
 				"Interface '$INTERFACE' is up; restarting instance '$section'"
-			/etc/init.d/scutclient restart_instance "$section"
+			/etc/init.d/scutclient restart "$section"
 			;;
 		ifdown)
 			logger -t scutclient \
 				"Interface '$INTERFACE' is down; stopping instance '$section'"
-			/etc/init.d/scutclient stop_instance "$section"
+			/etc/init.d/scutclient stop "$section"
 			;;
 	esac
 }

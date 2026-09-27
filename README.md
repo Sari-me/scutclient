@@ -56,9 +56,9 @@ is spawned as its own procd instance by `/etc/init.d/scutclient`, with its own
 log file under `/tmp/scutclient/<id>.log`. Single-instance commands:
 
 ```sh
-/etc/init.d/scutclient start_instance  <id>
-/etc/init.d/scutclient stop_instance   <id>
-/etc/init.d/scutclient restart_instance <id>
+/etc/init.d/scutclient start   <id>
+/etc/init.d/scutclient stop    <id>
+/etc/init.d/scutclient restart <id>
 /etc/init.d/scutclient logoff_instance <id>
 ```
 

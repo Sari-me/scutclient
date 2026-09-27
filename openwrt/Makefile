@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=scutclient
 PKG_VERSION:=3.3.0
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_MAINTAINER:=Scutclient Project
 PKG_LICENSE:=AGPL-3.0
