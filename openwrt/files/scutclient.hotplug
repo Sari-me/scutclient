@@ -7,16 +7,12 @@ case "$ACTION" in
 	*) exit 0 ;;
 esac
 
-# 只响应地址变化的 ifupdate，忽略普通 DHCP lease 元数据，避免重启风暴
-if [ "$ACTION" = "ifupdate" ]; then
-	[ "$IFUPDATE_ADDRESSES" = "1" ] || exit 0
-fi
-
 # MAC 应用期间（network/wifi reload 等待 WAN 恢复时）hotplug 不动作，
 # 避免 reload -> ifup -> restart -> 再 reload 的循环。
 [ -e /var/run/scutclient-network-apply.lock ] && exit 0
 
 . /lib/functions.sh
+. /lib/functions/network.sh
 
 SC_MAIN_ENABLE=0
 
@@ -38,16 +34,46 @@ scutclient_hotplug_handle() {
 	# 只处理绑定该 WAN 的实例，不影响其他已认证实例
 	[ "$interface" = "$INTERFACE" ] || return 0
 
+	# 用户手动 Stop 过的实例：hotplug 不得擅自拉起，
+	# 直到用户再次 Start/Restart（marker 由 start_service 清除）
+	[ -e "/var/run/scutclient/manual-stop/$section" ] && {
+		logger -t scutclient \
+			"Instance '$section' is manually stopped; ignoring $ACTION"
+		return 0
+	}
+
 	case "$ACTION" in
-		ifup|ifupdate)
+		ifup)
 			logger -t scutclient \
-				"Interface '$INTERFACE' is up (action=$ACTION); restarting instance '$section'"
+				"Interface '$INTERFACE' is up; restarting instance '$section'"
+			/etc/init.d/scutclient restart "$section"
+			;;
+		ifupdate)
+			# 仅当实例在运行且地址真的变化时才重启，
+			# 忽略普通 DHCP lease 元数据，避免重启风暴
+			local running
+			running="$(ubus -S call service list '{"name":"scutclient"}' 2>/dev/null | \
+				jsonfilter -e "@.scutclient.instances.$section.running" 2>/dev/null)"
+			[ "$running" = "1" ] || {
+				logger -t scutclient \
+					"Instance '$section' is not running; skipping ifupdate"
+				return 0
+			}
+
+			local current_ip="" old_ip=""
+			network_get_ipaddr current_ip "$INTERFACE" 2>/dev/null
+			old_ip="$(cat "/var/run/scutclient/$section.source-ip" 2>/dev/null)"
+
+			[ -n "$current_ip" ] && [ "$current_ip" != "$old_ip" ] || return 0
+
+			logger -t scutclient \
+				"Interface '$INTERFACE' address changed ($old_ip -> $current_ip); restarting instance '$section'"
 			/etc/init.d/scutclient restart "$section"
 			;;
 		ifdown)
 			logger -t scutclient \
 				"Interface '$INTERFACE' is down; stopping instance '$section'"
-			/etc/init.d/scutclient stop "$section"
+			SCUTCLIENT_HOTPLUG=1 /etc/init.d/scutclient stop "$section"
 			;;
 	esac
 }

@@ -243,6 +243,9 @@ static int PortalHttpGet(const char *action, const char *url,
 	curl_easy_setopt(curl, CURLOPT_INTERFACE, PortalCtx.source_ipv4);
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
+	/* 源绑定是 IPv4：强制 v4 避免创建 AF_INET6 socket
+	 * （mwan3 preload wrapper 对 v6 socket 同样不安全） */
+	curl_easy_setopt(curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
 	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS,
 			(long) PortalConnectTimeout * 1000L);
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS,
