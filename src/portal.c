@@ -205,7 +205,7 @@ static int PortalHttpGet(const char *action, const char *url,
 	CURL *curl;
 	char errbuf[CURL_ERROR_SIZE];
 	char primary_ip[64] = "";
-	char primary_port[16] = "";
+	long primary_port = -1;
 	CURLcode rc;
 
 	portal_curl_init();
@@ -269,12 +269,12 @@ static int PortalHttpGet(const char *action, const char *url,
 		char *s = NULL;
 		if (curl_easy_getinfo(curl, CURLINFO_PRIMARY_IP, &s) == CURLE_OK && s)
 			snprintf(primary_ip, sizeof(primary_ip), "%s", s);
-		if (curl_easy_getinfo(curl, CURLINFO_PRIMARY_PORT, &s) == CURLE_OK && s)
-			snprintf(primary_port, sizeof(primary_port), "%s", s);
+		/* CURLINFO_PRIMARY_PORT 要求 long*，误用 char* 会破坏内存 */
+		curl_easy_getinfo(curl, CURLINFO_PRIMARY_PORT, &primary_port);
 	}
 
 	LogWrite(DRCOM, INF,
-			"Portal HTTP: action=%s device=%s source=%s remote=%s:%s http=%ld",
+			"Portal HTTP: action=%s device=%s source=%s remote=%s:%ld http=%ld",
 			action, DeviceName, PortalCtx.source_ipv4,
 			primary_ip, primary_port, response->http_code);
 
