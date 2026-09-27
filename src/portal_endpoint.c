@@ -21,6 +21,9 @@ void PortalDrcomLoginDefaults(PortalDrcomLoginConfig *cfg) {
 	cfg->page_index = 0;
 	cfg->terminal_type = 1;
 	cfg->mac_type = 0;
+
+	/* 官方前端：R6: f0.R6 ? f0.R6.value : 0 —— 无字段时默认 "0" */
+	strcpy(cfg->r6, "0");
 	strcpy(cfg->js_version, PORTAL_JS_VERSION);
 }
 

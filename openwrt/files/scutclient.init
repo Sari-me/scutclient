@@ -382,6 +382,15 @@ scutclient_start_instance() {
 	config_get auth_method "$section" auth_method "dot1x"
 	config_get portal_location "$section" portal_location ""
 
+	case "$auth_method" in
+		dot1x|portal) ;;
+		*)
+			logger -t scutclient \
+				"Skip $section: invalid auth_method '$auth_method'"
+			return 1
+			;;
+	esac
+
 	# reload 之后重新解析真实 netdev（无线 STA 的 netdev 可能变化）
 	ifname="$(scutclient_resolve_device "$interface")"
 

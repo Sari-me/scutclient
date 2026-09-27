@@ -65,6 +65,14 @@ typedef struct {
 	char curl_reason[32];
 } PortalHttpResponse;
 
+/* 登录结果分类：RETRY=传输/解析/确认类（指数退避），
+ * AUTH_FAILED=服务器明确拒绝（固定 30s 慢速重试） */
+typedef enum {
+	PORTAL_LOGIN_OK = 0,
+	PORTAL_LOGIN_RETRY,
+	PORTAL_LOGIN_AUTH_FAILED
+} PortalLoginResult;
+
 static PortalRuntimeContext PortalCtx;
 static int curl_ready = 0;
 
@@ -426,7 +434,7 @@ static void portal_build_account(char *out, size_t outlen) {
 }
 
 /* Dr.COM Web 登录（/drcom/login，实测可用路径） */
-static int portal_login_drcom(char *msg, size_t msglen) {
+static PortalLoginResult portal_login_drcom(char *msg, size_t msglen) {
 	char url[PORTAL_URL_MAX];
 	char json[PORTAL_BODY_MAX];
 	char account[PORTAL_ENC_MAX];
@@ -452,19 +460,19 @@ static int portal_login_drcom(char *msg, size_t msglen) {
 		snprintf(msg, msglen, "%s",
 				response.curl_reason[0] ?
 				response.curl_reason : "request_failed");
-		return -1;
+		return PORTAL_LOGIN_RETRY;
 	}
 
 	if (json_extract(response.body, json, sizeof(json)) != 0) {
 		snprintf(msg, msglen, "bad_response");
-		return -1;
+		return PORTAL_LOGIN_RETRY;
 	}
 
 	result[0] = 0;
 	json_get(json, "result", result, sizeof(result));
 
 	if (strcmp(result, "1") == 0)
-		return 0;
+		return PORTAL_LOGIN_OK;
 
 	{
 		char msga[PORTAL_VALUE_MAX];
@@ -490,11 +498,11 @@ static int portal_login_drcom(char *msg, size_t msglen) {
 		snprintf(msg, msglen, "%s", detail);
 	}
 
-	return -1;
+	return PORTAL_LOGIN_AUTH_FAILED;
 }
 
 /* ePortal 登录（显式选择 portal_protocol=eportal 时使用） */
-static int portal_login_eportal(char *msg, size_t msglen) {
+static PortalLoginResult portal_login_eportal(char *msg, size_t msglen) {
 	char url[PORTAL_URL_MAX];
 	char json[PORTAL_BODY_MAX];
 	char account[PORTAL_ENC_MAX];
@@ -516,30 +524,31 @@ static int portal_login_eportal(char *msg, size_t msglen) {
 		snprintf(msg, msglen, "%s",
 				response.curl_reason[0] ?
 				response.curl_reason : "request_failed");
-		return -1;
+		return PORTAL_LOGIN_RETRY;
 	}
 
 	if (json_extract(response.body, json, sizeof(json)) != 0) {
 		snprintf(msg, msglen, "bad_response");
-		return -1;
+		return PORTAL_LOGIN_RETRY;
 	}
 
 	result[0] = 0;
 	json_get(json, "result", result, sizeof(result));
 
 	if (strcmp(result, "1") == 0)
-		return 0;
+		return PORTAL_LOGIN_OK;
 
 	if (json_get(json, "msg", msg, msglen) != 0 || !msg[0])
 		snprintf(msg, msglen, "login_failed");
 
-	return -1;
+	return PORTAL_LOGIN_AUTH_FAILED;
 }
 
-/* 后端选择 + 登录成功后的二次 chkstatus 确认
- * 返回 0 = 已确认在线；1 = 需要重试（reconnecting）；-1 = 认证失败 */
-static int portal_login_attempt(char *msg, size_t msglen) {
-	int rc;
+/* 后端选择 + 登录成功后的二次 chkstatus 确认。
+ * 分类原样透传：RETRY（传输/确认类，指数退避）与
+ * AUTH_FAILED（服务器明确拒绝，30s 慢速重试）必须区分。 */
+static PortalLoginResult portal_login_attempt(char *msg, size_t msglen) {
+	PortalLoginResult rc;
 	PortalStatusInfo st;
 
 	if (PortalLoginBackend == PORTAL_LOGIN_EPORTAL)
@@ -547,21 +556,22 @@ static int portal_login_attempt(char *msg, size_t msglen) {
 	else
 		rc = portal_login_drcom(msg, msglen);
 
-	if (rc != 0)
-		return -1;
+	if (rc != PORTAL_LOGIN_OK)
+		return rc;
 
 	/* 登录成功 != online：二次 chkstatus 确认 */
-	sleep(1);
+	if (ScutSleepInterruptible(1))
+		return PORTAL_LOGIN_RETRY;
 
 	if (PortalCheckStatus(&st) != 0)
-		return 1;
+		return PORTAL_LOGIN_RETRY;
 
 	if (!st.online) {
 		snprintf(msg, msglen, "verify_pending");
-		return 1;
+		return PORTAL_LOGIN_RETRY;
 	}
 
-	return 0;
+	return PORTAL_LOGIN_OK;
 }
 
 /* ---------------- 对外接口 ---------------- */
@@ -656,7 +666,7 @@ void PortalRun(void) {
 
 	while (!ScutTerminate) {
 		PortalStatusInfo st;
-		int login_rc;
+		PortalLoginResult login_rc;
 
 		msg[0] = 0;
 
@@ -687,14 +697,14 @@ void PortalRun(void) {
 
 		login_rc = portal_login_attempt(msg, sizeof(msg));
 
-		if (login_rc == 0) {
+		if (login_rc == PORTAL_LOGIN_OK) {
 			RuntimeStatusSet("online", "portal_login_ok");
 			RuntimeStatusHeartbeat();
 			LogWrite(DRCOM, INF, "Portal: login verified via chkstatus.");
 			PortalCtx.transport_failures = 0;
 			PortalCtx.auth_failures = 0;
 			ScutSleepInterruptible(PortalCheckInterval);
-		} else if (login_rc == 1) {
+		} else if (login_rc == PORTAL_LOGIN_RETRY) {
 			/* 传输/确认类失败：指数退避 */
 			RuntimeStatusSet("reconnecting",
 					msg[0] ? msg : "reconnecting");
