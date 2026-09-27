@@ -84,18 +84,27 @@ jobs:
                      portal-check-interval portal-tls-verify \
                      portal-http-port portal-https-port \
                      portal-login-mode portal-program-index \
-                     portal-page-index portal-js-version portal-r3; do
+                     portal-page-index portal-js-version portal-r3 \
+                     route-isolation; do
             grep -q -- "\"$opt\"" src/main.c || {
               echo "Missing CLI option: --$opt"
               exit 1
             }
           done
 
-          # portal 后端必须被编译进二进制（URL 模型 + endpoint builder）
+          # portal 后端必须被编译进二进制（URL 模型 + endpoint builder + 状态）
           grep -q 'portal.c' CMakeLists.txt
           grep -q 'portal_url.c' CMakeLists.txt
           grep -q 'portal_endpoint.c' CMakeLists.txt
+          grep -q 'runtime_status.c' CMakeLists.txt
           grep -q 'CURL' CMakeLists.txt
+          grep -q '+libcurl' openwrt/Makefile
+
+          # init 必须同时具备 dot1x/portal 分支与路由隔离层
+          grep -q 'auth-method portal' openwrt/files/scutclient.init
+          grep -q 'auth-method dot1x' openwrt/files/scutclient.init
+          grep -q 'route_isolation' openwrt/files/scutclient.init
+          grep -q 'mwan3' openwrt/files/scutclient.init
 
           # MAC / portal probe helper 必须打包进 ipk
           grep -q 'scutclient-mac' openwrt/Makefile

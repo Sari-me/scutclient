@@ -104,6 +104,12 @@ scutclient --username <username> --password <password> [options...]
      --portal-tls-verify <0|1> Verify https portal certificates. Default 1.
      --portal-http-port <port> ePortal login port for http Locations. Default 801.
      --portal-https-port <port> ePortal login port for https Locations. Default 802.
+     --portal-login-mode <auto|drcom|eportal> Portal login backend. Default auto.
+     --portal-program-index <idx> Dr.COM Web program index override.
+     --portal-page-index <n> Dr.COM Web page index override.
+     --portal-js-version <ver> Dr.COM Web jsVersion override. Default 4.1.3.
+     --portal-r3 <value> Dr.COM Web R3 override.
+     --route-isolation <native|mwan3> How the instance is launched.
  -D, --debug [level] Enable debug output (numeric level 0-5).
  -o, --logoff
 ```
