@@ -26,6 +26,8 @@ int PortalConnectTimeout = 5;
 int PortalTimeout = 10;
 int PortalCheckInterval = 15;
 int PortalTlsVerify = 1;
+int PortalEportalHttpPort = 801;
+int PortalEportalHttpsPort = 802;
 
 unsigned char ExpectedMAC[6] = { 0 };
 int HaveExpectedMAC = 0;

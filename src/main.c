@@ -41,6 +41,8 @@ static const struct option long_options[] = {
 	{"portal-timeout", required_argument, NULL, 1014},
 	{"portal-check-interval", required_argument, NULL, 1015},
 	{"portal-tls-verify", required_argument, NULL, 1016},
+	{"portal-http-port", required_argument, NULL, 1017},
+	{"portal-https-port", required_argument, NULL, 1018},
 	{"debug", optional_argument, NULL, 'D'},
 	{"logoff", no_argument, NULL, 'o'},
 	{NULL, no_argument, NULL, 0}
@@ -74,6 +76,8 @@ void PrintHelp(const char * argn) {
 		"     --portal-timeout <sec> Portal request timeout. Default 10.\n"
 		"     --portal-check-interval <sec> Portal online check interval. Default 15.\n"
 		"     --portal-tls-verify <0|1> Verify https portal certificates. Default 1.\n"
+		"     --portal-http-port <port> ePortal login port for http Locations. Default 801.\n"
+		"     --portal-https-port <port> ePortal login port for https Locations. Default 802.\n"
 		" -D, --debug [level] Enable debug output (numeric level 0-5).\n"
 		" -o, --logoff\n",
 		argn);
@@ -219,6 +223,12 @@ int main(int argc, char *argv[]) {
 			break;
 		case 1016:
 			PortalTlsVerify = atoi(optarg);
+			break;
+		case 1017:
+			PortalEportalHttpPort = atoi(optarg);
+			break;
+		case 1018:
+			PortalEportalHttpsPort = atoi(optarg);
 			break;
 		case 'D':
 			if (optarg) {

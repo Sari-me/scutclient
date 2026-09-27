@@ -45,6 +45,8 @@ extern int PortalConnectTimeout;  /* curl connect timeout, seconds */
 extern int PortalTimeout;         /* curl request timeout, seconds */
 extern int PortalCheckInterval;   /* online check / relogin interval, seconds */
 extern int PortalTlsVerify;       /* verify https:// portal certificates */
+extern int PortalEportalHttpPort;  /* ePortal login port for http Locations */
+extern int PortalEportalHttpsPort; /* ePortal login port for https Locations */
 
 /* Expected interface MAC (mac spoof verification). */
 extern unsigned char ExpectedMAC[6];
