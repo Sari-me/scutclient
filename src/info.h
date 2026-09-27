@@ -33,6 +33,10 @@ extern int HBTimeout;    /* Dr.com UDP heartbeat timeout, seconds */
 extern int EAPTimeout;   /* 802.1X receive timeout, seconds */
 extern int EAPRetries;   /* 802.1X retry times */
 
+/* Expected interface MAC (mac spoof verification). */
+extern unsigned char ExpectedMAC[6];
+extern int HaveExpectedMAC;
+
 int hexStrToByte(const char* source, unsigned char* dest, int bufLen);
 #endif
 

@@ -26,6 +26,7 @@ static const struct option long_options[] = {
 	{"heartbeat-timeout", required_argument, NULL, 1001},
 	{"eap-timeout", required_argument, NULL, 1002},
 	{"eap-retries", required_argument, NULL, 1003},
+	{"expected-mac", required_argument, NULL, 1004},
 	{"debug", optional_argument, NULL, 'D'},
 	{"logoff", no_argument, NULL, 'o'},
 	{NULL, no_argument, NULL, 0}
@@ -46,6 +47,7 @@ void PrintHelp(const char * argn) {
 		"     --heartbeat-timeout <sec> Dr.com UDP heartbeat timeout. Default 2.\n"
 		"     --eap-timeout <sec> 802.1X receive timeout. Default 1.\n"
 		"     --eap-retries <times> 802.1X retry times. Default 3.\n"
+		"     --expected-mac <mac> Abort if the interface MAC does not match.\n"
 		" -D, --debug\n"
 		" -o, --logoff\n",
 		argn);
@@ -127,6 +129,16 @@ int main(int argc, char *argv[]) {
 			break;
 		case 1003:
 			EAPRetries = atoi(optarg);
+			break;
+		case 1004:
+			if (sscanf(optarg, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+					&ExpectedMAC[0], &ExpectedMAC[1],
+					&ExpectedMAC[2], &ExpectedMAC[3],
+					&ExpectedMAC[4], &ExpectedMAC[5]) != 6) {
+				LogWrite(INIT, ERROR, "Expected MAC invalid!");
+				exit(-1);
+			}
+			HaveExpectedMAC = 1;
 			break;
 		case 'D':
 			if (optarg) {

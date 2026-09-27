@@ -18,6 +18,9 @@ int HBTimeout = 2;
 int EAPTimeout = 1;
 int EAPRetries = 3;
 
+unsigned char ExpectedMAC[6] = { 0 };
+int HaveExpectedMAC = 0;
+
 int hexStrToByte(const char* source, unsigned char* dest, int bufLen) {
 	int i;
 	unsigned char highByte, lowByte;

@@ -6,6 +6,7 @@ USE_PROCD=1
 
 PROG="/usr/bin/scutclient"
 CONFIG="scutclient"
+MAC_HELPER="/usr/lib/scutclient/scutclient-mac"
 
 EXTRA_COMMANDS="start_instance stop_instance restart_instance logoff_instance logoff"
 EXTRA_HELP="
@@ -172,6 +173,7 @@ scutclient_start_instance() {
 	local dns hostname server_auth_ip version hash
 	local nettime onlinehook offlinehook
 	local heartbeat_interval heartbeat_timeout eap_timeout eap_retries
+	local mac_mode macaddr expected_mac=""
 	local ifname=""
 
 	config_get_bool enabled "$section" enabled 1
@@ -196,6 +198,9 @@ scutclient_start_instance() {
 	config_get eap_timeout "$section" eap_timeout "1"
 	config_get eap_retries "$section" eap_retries "3"
 
+	config_get mac_mode "$section" mac_mode "keep"
+	config_get macaddr "$section" macaddr ""
+
 	[ -n "$username" ] || {
 		logger -t scutclient "Skip $section: username is empty"
 		return 1
@@ -215,6 +220,17 @@ scutclient_start_instance() {
 	}
 
 	scutclient_check_exclusive "$interface" "$ifname" "$section" || return 1
+
+	# MAC spoof：random/custom 模式先由 helper 持久化并应用到接口，
+	# helper 成功时在 stdout 输出生效的 MAC，交给 C 核心做 expected 校验。
+	if [ "$mac_mode" != "keep" ]; then
+		expected_mac="$("$MAC_HELPER" apply "$section")"
+		[ -n "$expected_mac" ] || {
+			logger -t scutclient \
+				"Skip $section: unable to apply configured MAC ($mac_mode)"
+			return 1
+		}
+	fi
 
 	logger -t scutclient \
 		"Starting $section on logical interface '$interface' ($ifname)"
@@ -251,6 +267,9 @@ scutclient_start_instance() {
 		--heartbeat-timeout "$heartbeat_timeout" \
 		--eap-timeout "$eap_timeout" \
 		--eap-retries "$eap_retries"
+
+	[ -n "$expected_mac" ] && \
+		procd_append_param command --expected-mac "$expected_mac"
 
 	procd_set_param netdev "$ifname"
 	procd_set_param stdout 1

@@ -65,6 +65,7 @@ jobs:
           test -f openwrt/files/scutclient.config
           test -f openwrt/files/scutclient.init
           test -f openwrt/files/scutclient.hotplug
+          test -f openwrt/files/scutclient-mac
 
           grep -q '^PKG_NAME:=scutclient$' openwrt/Makefile
 
@@ -97,6 +98,9 @@ jobs:
 
           cp openwrt/files/scutclient.hotplug \
             .ci-feed/scutclient/files/scutclient.hotplug
+
+          cp openwrt/files/scutclient-mac \
+            .ci-feed/scutclient/files/scutclient-mac
 
           echo "===== CI feed ====="
           find .ci-feed -maxdepth 4 -type f -print

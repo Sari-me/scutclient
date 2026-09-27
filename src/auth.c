@@ -135,6 +135,16 @@ int auth_8021x_Init() {
 	if ((ret = getIfMAC(auth_8021x_sock)) < 0) {
 		goto ERR;
 	}
+	if (HaveExpectedMAC && memcmp(MAC, ExpectedMAC, 6) != 0) {
+		LogWrite(DOT1X, ERROR,
+				"MAC mismatch on %s: expected %02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx, actual %02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
+				DeviceName,
+				ExpectedMAC[0], ExpectedMAC[1], ExpectedMAC[2],
+				ExpectedMAC[3], ExpectedMAC[4], ExpectedMAC[5],
+				MAC[0], MAC[1], MAC[2], MAC[3], MAC[4], MAC[5]);
+		ret = -1;
+		goto ERR;
+	}
 	if ((ret = getIfIndex(auth_8021x_sock)) < 0) {
 		goto ERR;
 	}

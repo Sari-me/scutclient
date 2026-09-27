@@ -8,8 +8,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=scutclient
-PKG_VERSION:=3.1.3
-PKG_RELEASE:=2
+PKG_VERSION:=3.2.0
+PKG_RELEASE:=1
 
 PKG_MAINTAINER:=Scutclient Project
 PKG_LICENSE:=AGPL-3.0
@@ -74,6 +74,11 @@ define Package/scutclient/install
 	$(INSTALL_BIN) \
 		$(CURDIR)/files/scutclient.hotplug \
 		$(1)/etc/hotplug.d/iface/99-scutclient
+
+	$(INSTALL_DIR) $(1)/usr/lib/scutclient
+	$(INSTALL_BIN) \
+		$(CURDIR)/files/scutclient-mac \
+		$(1)/usr/lib/scutclient/scutclient-mac
 
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) \
