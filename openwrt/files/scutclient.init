@@ -388,6 +388,12 @@ start_instance() {
 	scutclient_check_instance "$section" || return 1
 
 	config_load "$CONFIG"
+
+	# 单实例启动同样执行 WAN 独占检查
+	USED_NETWORKS=""
+	USED_DEVICES=""
+	config_foreach scutclient_collect_usage scutclient
+
 	scutclient_start_instance "$section"
 }
 
@@ -405,6 +411,8 @@ restart_instance() {
 	scutclient_check_instance "$section" || return 1
 
 	stop_instance "$section"
+	# 等待旧进程完成 EAPOL logoff，避免同 MAC 会话冲突
+	sleep 1
 	start_instance "$section"
 }
 
