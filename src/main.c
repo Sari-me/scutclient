@@ -43,6 +43,11 @@ static const struct option long_options[] = {
 	{"portal-tls-verify", required_argument, NULL, 1016},
 	{"portal-http-port", required_argument, NULL, 1017},
 	{"portal-https-port", required_argument, NULL, 1018},
+	{"portal-login-mode", required_argument, NULL, 1019},
+	{"portal-program-index", required_argument, NULL, 1020},
+	{"portal-page-index", required_argument, NULL, 1021},
+	{"portal-js-version", required_argument, NULL, 1022},
+	{"portal-r3", required_argument, NULL, 1023},
 	{"debug", optional_argument, NULL, 'D'},
 	{"logoff", no_argument, NULL, 'o'},
 	{NULL, no_argument, NULL, 0}
@@ -78,6 +83,11 @@ void PrintHelp(const char * argn) {
 		"     --portal-tls-verify <0|1> Verify https portal certificates. Default 1.\n"
 		"     --portal-http-port <port> ePortal login port for http Locations. Default 801.\n"
 		"     --portal-https-port <port> ePortal login port for https Locations. Default 802.\n"
+		"     --portal-login-mode <auto|drcom|eportal> Portal login backend. Default auto.\n"
+		"     --portal-program-index <idx> Dr.COM Web program index override.\n"
+		"     --portal-page-index <n> Dr.COM Web page index override.\n"
+		"     --portal-js-version <ver> Dr.COM Web jsVersion override. Default 4.1.3.\n"
+		"     --portal-r3 <value> Dr.COM Web R3 override.\n"
 		" -D, --debug [level] Enable debug output (numeric level 0-5).\n"
 		" -o, --logoff\n",
 		argn);
@@ -229,6 +239,30 @@ int main(int argc, char *argv[]) {
 			break;
 		case 1018:
 			PortalEportalHttpsPort = atoi(optarg);
+			break;
+		case 1019:
+			if (!strcmp(optarg, "auto")) {
+				PortalLoginBackend = PORTAL_LOGIN_AUTO;
+			} else if (!strcmp(optarg, "drcom")) {
+				PortalLoginBackend = PORTAL_LOGIN_DRCOM;
+			} else if (!strcmp(optarg, "eportal")) {
+				PortalLoginBackend = PORTAL_LOGIN_EPORTAL;
+			} else {
+				LogWrite(INIT, ERROR, "Invalid portal login mode '%s'!", optarg);
+				exit(-1);
+			}
+			break;
+		case 1020:
+			PortalProgramIndex = optarg;
+			break;
+		case 1021:
+			PortalPageIndex = atoi(optarg);
+			break;
+		case 1022:
+			PortalJsVersion = optarg;
+			break;
+		case 1023:
+			PortalR3 = optarg;
 			break;
 		case 'D':
 			if (optarg) {

@@ -28,6 +28,11 @@ int PortalCheckInterval = 15;
 int PortalTlsVerify = 1;
 int PortalEportalHttpPort = 801;
 int PortalEportalHttpsPort = 802;
+int PortalLoginBackend = PORTAL_LOGIN_AUTO;
+const char *PortalProgramIndex = NULL;
+int PortalPageIndex = 0;
+const char *PortalJsVersion = NULL;
+const char *PortalR3 = NULL;
 
 unsigned char ExpectedMAC[6] = { 0 };
 int HaveExpectedMAC = 0;

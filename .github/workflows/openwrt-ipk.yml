@@ -82,7 +82,9 @@ jobs:
                      auth-method portal-location portal-suffix \
                      portal-connect-timeout portal-timeout \
                      portal-check-interval portal-tls-verify \
-                     portal-http-port portal-https-port; do
+                     portal-http-port portal-https-port \
+                     portal-login-mode portal-program-index \
+                     portal-page-index portal-js-version portal-r3; do
             grep -q -- "\"$opt\"" src/main.c || {
               echo "Missing CLI option: --$opt"
               exit 1

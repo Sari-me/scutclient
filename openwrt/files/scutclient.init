@@ -428,6 +428,11 @@ scutclient_start_instance() {
 		config_get_bool portal_tls_verify "$section" portal_tls_verify 1
 		config_get portal_http_port "$section" portal_http_port "801"
 		config_get portal_https_port "$section" portal_https_port "802"
+		config_get portal_login_mode "$section" portal_protocol "auto"
+		config_get portal_program_index "$section" portal_program_index ""
+		config_get portal_page_index "$section" portal_page_index ""
+		config_get portal_js_version "$section" portal_js_version ""
+		config_get portal_r3 "$section" portal_r3 ""
 
 		procd_append_param command \
 			--auth-method portal \
@@ -437,10 +442,21 @@ scutclient_start_instance() {
 			--portal-check-interval "$portal_check_interval" \
 			--portal-tls-verify "$portal_tls_verify" \
 			--portal-http-port "$portal_http_port" \
-			--portal-https-port "$portal_https_port"
+			--portal-https-port "$portal_https_port" \
+			--portal-login-mode "$portal_login_mode"
 
 		[ -n "$portal_suffix" ] && \
 			procd_append_param command --portal-suffix "$portal_suffix"
+
+		# 页面运行时数据 override：留空不传
+		[ -n "$portal_program_index" ] && \
+			procd_append_param command --portal-program-index "$portal_program_index"
+		[ -n "$portal_page_index" ] && \
+			procd_append_param command --portal-page-index "$portal_page_index"
+		[ -n "$portal_js_version" ] && \
+			procd_append_param command --portal-js-version "$portal_js_version"
+		[ -n "$portal_r3" ] && \
+			procd_append_param command --portal-r3 "$portal_r3"
 	else
 		procd_append_param command --auth-method dot1x
 	fi

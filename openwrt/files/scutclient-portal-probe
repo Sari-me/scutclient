@@ -1,11 +1,13 @@
 #!/bin/sh
 # scutclient-portal-probe - interface-bound captive portal Location probe.
 #
-# Usage: scutclient-portal-probe <real-netdev>
+# Usage: scutclient-portal-probe <real-netdev> [source-ipv4]
 #
 # Performs GET http://connectivitycheck.gstatic.com/generate_204 bound to
-# the given netdev WITHOUT following redirects (the first-hop Location is
-# exactly what we want) and prints:
+# the given netdev's source IPv4 (preferred, passed by the LuCI
+# controller from the netifd dump) or the netdev itself, WITHOUT
+# following redirects (the first-hop Location is exactly what we want),
+# and prints:
 #
 #   http_code=<HTTP status>
 #   location=<resolved redirect target, empty when none>
@@ -19,6 +21,7 @@
 PROBE_URL="http://connectivitycheck.gstatic.com/generate_204"
 
 device="$1"
+source_ip="$2"
 
 case "$device" in
 	""|*[!A-Za-z0-9_.:-]*)
@@ -32,6 +35,13 @@ esac
 	exit 3
 }
 
+# 无线 netdev 设备名绑定间歇性失败：优先按源 IPv4 绑定（由 LuCI
+# controller 从 netifd dump 解析后传入）。
+bind_target="$device"
+case "$source_ip" in
+	*.*) bind_target="$source_ip" ;;
+esac
+
 command -v curl >/dev/null 2>&1 || {
 	echo "error=curl_missing"
 	exit 5
@@ -39,7 +49,7 @@ command -v curl >/dev/null 2>&1 || {
 
 result="$(
 	curl \
-		--interface "$device" \
+		--interface "$bind_target" \
 		-sS \
 		--connect-timeout 5 \
 		--max-time 8 \
