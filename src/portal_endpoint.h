@@ -52,6 +52,7 @@ int PortalBuildEportalLoginURL(const PortalLocationInfo *loc,
 		const PortalConfig *cfg,
 		const char *account, const char *password,
 		const char *ip, const char *mac,
+		const char *ac_ip, const char *ac_name,
 		char *out, size_t outlen);
 
 /* Dr.COM Web 登录（<origin>/drcom/login）。

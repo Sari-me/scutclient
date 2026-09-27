@@ -6,7 +6,8 @@
  *   1. HTTP 绑定实例的源 IPv4（每次请求前用 SIOCGIFADDR 重新获取），
  *      而不是无线设备名——apcli0 等无线 netdev 设备绑定会间歇性失败，
  *      源 IP 绑定连续稳定。无 IPv4 时不回退默认路由，等待接口恢复。
- *   2. 客户端 MAC 使用实例 netdev 的真实 MAC，不信任服务器回显。
+ *   2. ePortal 终端身份按网页规则取 Location 的 MAC，随后是 ss4；
+ *      两者都没有时发送全零 MAC，不把随机 netdev MAC 冒充门户身份。
  *   3. 登录后端按 portal_login_mode 选择：AUTO 默认 Dr.COM Web
  *      （/drcom/login，实测可用），ePortal 仅在显式选择时使用。
  *   4. 登录成功后必须二次 chkstatus 确认才标记 online。
@@ -30,6 +31,8 @@
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <arpa/inet.h>
+#include <ctype.h>
+#include <ifaddrs.h>
 #include <net/if.h>
 #include <netinet/in.h>
 
@@ -43,7 +46,10 @@ typedef struct {
 	PortalDrcomLoginConfig drcom;
 
 	char source_ipv4[64];
-	char local_mac[32];
+	char portal_mac[32];
+	char server_mac[32];
+	char wlan_ac_ip[128];
+	char wlan_ac_name[128];
 
 	unsigned int request_seq;
 	unsigned int transport_failures;
@@ -55,6 +61,7 @@ typedef struct {
 	char server_ip[64];
 	char uid[128];
 	char server_mac[32];
+	char login_ip[64];
 	char result[16];
 } PortalStatusInfo;
 
@@ -148,43 +155,62 @@ static int portal_local_ipv4(const char *ifname, char *out, size_t outlen) {
 	return 0;
 }
 
-/* 实例 netdev 的真实 MAC（12 位无分隔），不使用服务器回显值 */
-static int portal_local_mac(const char *ifname, char *out, size_t outlen) {
-	char path[128];
-	char addr[64];
-	FILE *f;
-	size_t i, n = 0;
+static int portal_normalize_mac(const char *input, char *out, size_t outlen) {
+	size_t n = 0;
 
-	if (!ifname || !ifname[0])
+	if (!input || outlen < 13)
 		return -1;
-
-	snprintf(path, sizeof(path), "/sys/class/net/%s/address", ifname);
-	f = fopen(path, "r");
-	if (!f)
-		return -1;
-
-	if (!fgets(addr, sizeof(addr), f)) {
-		fclose(f);
-		return -1;
-	}
-	fclose(f);
-
-	for (i = 0; addr[i] && n + 1 < outlen; i++) {
-		if (addr[i] != ':' && addr[i] != '\n')
-			out[n++] = addr[i];
+	for (; *input; input++) {
+		if (*input == ':' || *input == '-')
+			continue;
+		if (!isxdigit((unsigned char) *input) || n >= 12)
+			return -1;
+		out[n++] = *input;
 	}
 	out[n] = 0;
+	return n == 12 ? 0 : -1;
+}
 
-	return (n == 12) ? 0 : -1;
+static void portal_query_first(const PortalLocationInfo *location,
+		const char *const *keys, size_t count,
+		char *out, size_t outlen) {
+	size_t i;
+
+	out[0] = 0;
+	for (i = 0; i < count; i++)
+		if (PortalLocationQueryGet(location, keys[i], out, outlen) == 0)
+			return;
+}
+
+/* chkstatus 的 lip 若明确指向另一块本机网卡，就不是本实例的在线记录。 */
+static int portal_ip_on_other_interface(const char *ip) {
+	struct ifaddrs *list, *item;
+	char address[INET_ADDRSTRLEN];
+	int found = 0;
+
+	if (!ip || !ip[0] || getifaddrs(&list) != 0)
+		return 0;
+	for (item = list; item; item = item->ifa_next) {
+		struct sockaddr_in *sin;
+		if (!item->ifa_addr || item->ifa_addr->sa_family != AF_INET ||
+				!item->ifa_name || !strcmp(item->ifa_name, DeviceName))
+			continue;
+		sin = (struct sockaddr_in *) item->ifa_addr;
+		if (inet_ntop(AF_INET, &sin->sin_addr,
+				address, sizeof(address)) && !strcmp(address, ip)) {
+			found = 1;
+			break;
+		}
+	}
+	freeifaddrs(list);
+	return found;
 }
 
 /* 刷新本请求的网络身份；失败（无 IPv4）时禁止回退默认路由 */
 static int portal_refresh_network(void) {
 	char ipv4[64];
-	char mac[32];
 
 	ipv4[0] = 0;
-	mac[0] = 0;
 
 	if (portal_local_ipv4(DeviceName, ipv4, sizeof(ipv4)) != 0) {
 		PortalCtx.source_ipv4[0] = 0;
@@ -194,12 +220,8 @@ static int portal_refresh_network(void) {
 		return -1;
 	}
 
-	portal_local_mac(DeviceName, mac, sizeof(mac));
-
 	snprintf(PortalCtx.source_ipv4, sizeof(PortalCtx.source_ipv4),
 			"%s", ipv4);
-	snprintf(PortalCtx.local_mac, sizeof(PortalCtx.local_mac),
-			"%s", mac);
 	RuntimeStatusSetField("source_ipv4", PortalCtx.source_ipv4);
 	return 0;
 }
@@ -403,6 +425,15 @@ static int PortalCheckStatus(PortalStatusInfo *st) {
 
 	json_get(json, "result", st->result, sizeof(st->result));
 	st->online = (strcmp(st->result, "1") == 0);
+	json_get(json, "lip", st->login_ip, sizeof(st->login_ip));
+	if (st->online && st->login_ip[0] &&
+			strcmp(st->login_ip, PortalCtx.source_ipv4) != 0 &&
+			portal_ip_on_other_interface(st->login_ip)) {
+		LogWrite(DRCOM, WARN,
+				"Portal: chkstatus belongs to another local interface (login_ip=%s, source=%s).",
+				st->login_ip, PortalCtx.source_ipv4);
+		st->online = 0;
+	}
 
 	json_get(json, "uid", st->uid, sizeof(st->uid));
 
@@ -411,11 +442,14 @@ static int PortalCheckStatus(PortalStatusInfo *st) {
 			!st->server_ip[0])
 		json_get(json, "v46ip", st->server_ip, sizeof(st->server_ip));
 
-	/* ss4 非全零才是服务器返回的客户端 MAC；
-	 * 无效则留空（登录使用本地 netdev 真实 MAC，不回退 ss1 以免语义失真） */
+	/* 网页只在 ss4 非全零时把它作为终端 MAC；
+	 * 不使用 ss1，它与 Location / ss4 的终端 MAC 语义不同。 */
 	json_get(json, "ss4", st->server_mac, sizeof(st->server_mac));
 	if (!st->server_mac[0] || !strcmp(st->server_mac, "000000000000"))
 		st->server_mac[0] = 0;
+	if (portal_normalize_mac(st->server_mac,
+			PortalCtx.server_mac, sizeof(PortalCtx.server_mac)) != 0)
+		PortalCtx.server_mac[0] = 0;
 
 	if (st->server_ip[0] && PortalCtx.source_ipv4[0] &&
 			strcmp(st->server_ip, PortalCtx.source_ipv4) != 0)
@@ -521,7 +555,11 @@ static PortalLoginResult portal_login_eportal(char *msg, size_t msglen) {
 
 	if (PortalBuildEportalLoginURL(&PortalCtx.location, &PortalCtx.cfg,
 			account, Password ? Password : "",
-			PortalCtx.source_ipv4, PortalCtx.local_mac,
+			PortalCtx.source_ipv4,
+			PortalCtx.portal_mac[0] ? PortalCtx.portal_mac :
+				(PortalCtx.server_mac[0] ? PortalCtx.server_mac :
+				"000000000000"),
+			PortalCtx.wlan_ac_ip, PortalCtx.wlan_ac_name,
 			url, sizeof(url)) != 0)
 		return -1;
 
@@ -635,7 +673,18 @@ void PortalLogout(void) {
 
 void PortalRun(void) {
 	char msg[64];
+	char query_mac[64];
+	static const char *const mac_keys[] = {
+		"mac", "usermac", "wlanusermac", "umac", "client_mac", "station_mac"
+	};
+	static const char *const ac_ip_keys[] = {
+		"wlanacip", "acip", "switchip", "nasip", "nas-ip"
+	};
+	static const char *const ac_name_keys[] = {
+		"wlanacname", "sysname", "nasname", "nas-name"
+	};
 	unsigned int delay;
+	portal_curl_init();
 
 	if (PortalLocationParse(PortalLocation, &PortalCtx.location) != 0) {
 		RuntimeStatusSet("error", "portal_location_invalid");
@@ -644,6 +693,18 @@ void PortalRun(void) {
 				"host required, no userinfo)!");
 		exit(EXIT_FAILURE);
 	}
+	portal_query_first(&PortalCtx.location, mac_keys,
+			sizeof(mac_keys) / sizeof(mac_keys[0]),
+			query_mac, sizeof(query_mac));
+	if (portal_normalize_mac(query_mac, PortalCtx.portal_mac,
+			sizeof(PortalCtx.portal_mac)) != 0)
+		PortalCtx.portal_mac[0] = 0;
+	portal_query_first(&PortalCtx.location, ac_ip_keys,
+			sizeof(ac_ip_keys) / sizeof(ac_ip_keys[0]),
+			PortalCtx.wlan_ac_ip, sizeof(PortalCtx.wlan_ac_ip));
+	portal_query_first(&PortalCtx.location, ac_name_keys,
+			sizeof(ac_name_keys) / sizeof(ac_name_keys[0]),
+			PortalCtx.wlan_ac_name, sizeof(PortalCtx.wlan_ac_name));
 
 	PortalConfigDefaults(&PortalCtx.cfg);
 	if (PortalEportalHttpPort > 0)
@@ -668,20 +729,19 @@ void PortalRun(void) {
 		snprintf(PortalCtx.drcom.r3, sizeof(PortalCtx.drcom.r3),
 				"%s", PortalR3);
 
-	portal_curl_init();
-
 	RuntimeStatusSetField("portal_backend",
 			PortalLoginBackend == PORTAL_LOGIN_EPORTAL ?
 			"eportal" : "drcom");
 
 	LogWrite(DRCOM, INF,
 			"Portal: Location parsed, scheme=%s host=%s port=%u "
-			"path=%s device=%s backend=%s.",
+			"path=%s device=%s backend=%s ac_name_present=%s.",
 			PortalCtx.location.scheme, PortalCtx.location.host,
 			PortalCtx.location.port, PortalCtx.location.path,
 			DeviceName,
 			PortalLoginBackend == PORTAL_LOGIN_EPORTAL ?
-			"eportal" : "drcom");
+			"eportal" : "drcom",
+			PortalCtx.wlan_ac_name[0] ? "yes" : "no");
 
 	while (!ScutTerminate) {
 		PortalStatusInfo st;

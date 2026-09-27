@@ -122,11 +122,15 @@ every API endpoint is derived from it — kernel `chkstatus`/`logout` follow
 the Location origin, ePortal login uses the configurable ePortal port
 (801 for http / 802 for https Locations, override with
 `--portal-http-port` / `--portal-https-port` or the per-instance
-`portal_http_port` / `portal_https_port` UCI options). The session is kept
-alive with an online check every `--portal-check-interval` seconds and
+`portal_http_port` / `portal_https_port` UCI options). The session is
+monitored with an online check every `--portal-check-interval` seconds and
 re-login happens automatically when the check reports offline. All
-requests are bound to the instance netdev; `--logoff` performs a portal
-logout for portal instances.
+requests use the instance's current IPv4 as their source; `--logoff`
+performs a portal logout for portal instances. ePortal login uses AC name/IP
+and terminal MAC from the Location query when present. Without a Location MAC,
+it uses the nonzero `ss4` value reported by `chkstatus`, or the all-zero MAC
+used by the campus login page. A `chkstatus` record whose `lip` belongs to a
+different local interface does not mark this instance online.
 
 ### MAC helper
 

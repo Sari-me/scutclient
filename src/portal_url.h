@@ -33,4 +33,8 @@ typedef struct {
  */
 int PortalLocationParse(const char *location, PortalLocationInfo *info);
 
+/* 从 Location 查询串读取并 URL 解码一个参数；不存在或无效时返回 -1。 */
+int PortalLocationQueryGet(const PortalLocationInfo *info, const char *key,
+		char *out, size_t outlen);
+
 #endif /* __PORTAL_URL_H__ */

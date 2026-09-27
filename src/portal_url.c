@@ -8,7 +8,65 @@
 
 #include <curl/curl.h>
 #include <curl/urlapi.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+int PortalLocationQueryGet(const PortalLocationInfo *info, const char *key,
+		char *out, size_t outlen) {
+	const char *p;
+	size_t keylen;
+	CURL *curl;
+	char *decoded;
+	int decoded_len;
+	int ret = -1;
+
+	if (!info || !key || !key[0] || !out || !outlen)
+		return -1;
+	out[0] = 0;
+	keylen = strlen(key);
+	p = info->query;
+	while (*p) {
+		const char *end = strchr(p, '&');
+		const char *value;
+		size_t len;
+
+		if (!end)
+			end = p + strlen(p);
+		if ((size_t) (end - p) > keylen &&
+				memcmp(p, key, keylen) == 0 && p[keylen] == '=') {
+			char encoded[PORTAL_QUERY_MAX];
+			size_t i;
+			value = p + keylen + 1;
+			len = (size_t) (end - value);
+			if (len >= sizeof(encoded))
+				return -1;
+			memcpy(encoded, value, len);
+			for (i = 0; i < len; i++)
+				if (encoded[i] == '+')
+					encoded[i] = ' ';
+			encoded[len] = 0;
+			curl = curl_easy_init();
+			if (!curl)
+				return -1;
+			decoded = curl_easy_unescape(curl, encoded, (int) len,
+					&decoded_len);
+			if (decoded && decoded_len > 0 &&
+					(size_t) decoded_len < outlen &&
+					!memchr(decoded, 0, (size_t) decoded_len)) {
+				memcpy(out, decoded, (size_t) decoded_len);
+				out[decoded_len] = 0;
+				ret = 0;
+			}
+			if (decoded)
+				curl_free(decoded);
+			curl_easy_cleanup(curl);
+			return ret;
+		}
+		p = *end ? end + 1 : end;
+	}
+	return -1;
+}
 
 int PortalLocationParse(const char *location, PortalLocationInfo *info) {
 	CURLU *url;

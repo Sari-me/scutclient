@@ -143,10 +143,13 @@ int PortalBuildEportalLoginURL(const PortalLocationInfo *loc,
 		const PortalConfig *cfg,
 		const char *account, const char *password,
 		const char *ip, const char *mac,
+		const char *ac_ip, const char *ac_name,
 		char *out, size_t outlen) {
 	CURL *handle;
 	char enc_account[PORTAL_ENC_MAX];
 	char enc_password[PORTAL_ENC_MAX];
+	char enc_ac_ip[PORTAL_ENC_MAX];
+	char enc_ac_name[PORTAL_ENC_MAX];
 	unsigned int eport;
 	int n;
 
@@ -162,7 +165,11 @@ int PortalBuildEportalLoginURL(const PortalLocationInfo *loc,
 	if (portal_escape(handle, account ? account : "",
 			enc_account, sizeof(enc_account)) != 0 ||
 			portal_escape(handle, password ? password : "",
-			enc_password, sizeof(enc_password)) != 0) {
+			enc_password, sizeof(enc_password)) != 0 ||
+			portal_escape(handle, ac_ip ? ac_ip : "",
+			enc_ac_ip, sizeof(enc_ac_ip)) != 0 ||
+			portal_escape(handle, ac_name ? ac_name : "",
+			enc_ac_name, sizeof(enc_ac_name)) != 0) {
 		curl_easy_cleanup(handle);
 		return -1;
 	}
@@ -176,11 +183,12 @@ int PortalBuildEportalLoginURL(const PortalLocationInfo *loc,
 			"%s://%s:%u/eportal/portal/login?callback=dr&login_method=1"
 			"&user_account=%s&user_password=%s"
 			"&wlan_user_ip=%s&wlan_user_ipv6=&wlan_user_mac=%s"
-			"&wlan_ac_ip=&wlan_ac_name=&terminal_type=1"
+			"&wlan_ac_ip=%s&wlan_ac_name=%s&terminal_type=1&mac_type=0"
 			"&jsVersion=" PORTAL_JS_VERSION "&lang=zh",
 			loc->scheme, loc->host, eport,
 			enc_account, enc_password,
-			ip ? ip : "", mac ? mac : "");
+			ip ? ip : "", mac ? mac : "",
+			enc_ac_ip, enc_ac_name);
 
 	return (n < 0 || (size_t) n >= outlen) ? -1 : 0;
 }
