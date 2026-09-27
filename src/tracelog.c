@@ -83,9 +83,16 @@ int LogInit(const char *inst, const char *file, LOGLEVEL level,
 	if (keep > 0)
 		log_keep = keep;
 
-	if (file && file[0] && strcmp(file, "off") != 0) {
-		strncpy(filepath, file, sizeof(filepath) - 1);
-		filepath[sizeof(filepath) - 1] = 0;
+	if (file && file[0] && strcmp(file, "off") == 0) {
+		/* 显式关闭文件日志：仅输出 stdout（procd/system log） */
+		file_log_enabled = 0;
+	} else {
+		if (file && file[0]) {
+			strncpy(filepath, file, sizeof(filepath) - 1);
+			filepath[sizeof(filepath) - 1] = 0;
+		} else {
+			strcpy(filepath, "/tmp/scutclient.log");
+		}
 
 		/* 确保日志目录存在（如 /tmp/scutclient/） */
 		strncpy(dirbuf, filepath, sizeof(dirbuf) - 1);

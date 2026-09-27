@@ -294,24 +294,13 @@ int main(int argc, char *argv[]) {
 	if (HostName[0] == 0)
 		gethostname(HostName, sizeof(HostName));
 
-	if ((client != LOGOFF) && !((UserName && Password && UserName[0] && Password[0]))) {
-		LogWrite(INIT, ERROR, "Please specify username and password!");
-		exit(-1);
-	}
 	if (udpserver_ipaddr.s_addr == 0)
 		inet_aton(SERVER_ADDR, &udpserver_ipaddr);
 	if (dns_ipaddr.s_addr == 0)
 		inet_aton(DNS_ADDR, &dns_ipaddr);
 
-	if (HBInterval < 1 || HBInterval > 3600 ||
-			HBTimeout < 1 || HBTimeout > 3600 ||
-			EAPTimeout < 1 || EAPTimeout > 3600 ||
-			EAPRetries < 1 || EAPRetries > 100) {
-		LogWrite(INIT, ERROR, "Heartbeat/EAP parameters out of range!");
-		exit(-1);
-	}
-
-	/* 日志初始化（等级/文件/轮转），必须先于横幅输出 */
+	/* 日志初始化（等级/文件/轮转），必须先于一切校验与横幅输出，
+	 * 保证启动异常也能如实写入实例日志与状态文件 */
 	if (loglev_str) {
 		if (!strcmp(loglev_str, "error")) {
 			init_level = ERROR;
@@ -342,6 +331,25 @@ int main(int argc, char *argv[]) {
 	RuntimeStatusSetField("device", DeviceName);
 	RuntimeStatusSetField("route_isolation",
 			RouteIsolation ? RouteIsolation : "native");
+
+	/* 以下校验在日志/状态就绪后执行：失败原因可完整落盘 */
+	if ((client != LOGOFF) &&
+			!((UserName && Password && UserName[0] && Password[0]))) {
+		RuntimeStatusSet("error", "credentials_missing");
+		LogWrite(INIT, ERROR, "Please specify username and password!");
+		LogClose();
+		exit(-1);
+	}
+
+	if (HBInterval < 1 || HBInterval > 3600 ||
+			HBTimeout < 1 || HBTimeout > 3600 ||
+			EAPTimeout < 1 || EAPTimeout > 3600 ||
+			EAPRetries < 1 || EAPRetries > 100) {
+		RuntimeStatusSet("error", "parameters_out_of_range");
+		LogWrite(INIT, ERROR, "Heartbeat/EAP parameters out of range!");
+		LogClose();
+		exit(-1);
+	}
 
 	/* Portal 后端：在线检测 + 自动重登录主循环（--logoff 时只注销一次） */
 	if (AuthMethod == AUTH_PORTAL) {

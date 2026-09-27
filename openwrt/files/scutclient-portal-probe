@@ -1,7 +1,7 @@
 #!/bin/sh
 # scutclient-portal-probe - interface-bound captive portal Location probe.
 #
-# Usage: scutclient-portal-probe <real-netdev> [source-ipv4]
+# Usage: scutclient-portal-probe <logical-if> <real-netdev> [source-ipv4]
 #
 # Performs GET http://connectivitycheck.gstatic.com/generate_204 bound to
 # the given netdev's source IPv4 (preferred, passed by the LuCI
@@ -20,8 +20,9 @@
 
 PROBE_URL="http://connectivitycheck.gstatic.com/generate_204"
 
-device="$1"
-source_ip="$2"
+logical_if="$1"
+device="$2"
+source_ip="$3"
 
 case "$device" in
 	""|*[!A-Za-z0-9_.:-]*)
@@ -36,11 +37,21 @@ esac
 }
 
 # 无线 netdev 设备名绑定间歇性失败：优先按源 IPv4 绑定（由 LuCI
-# controller 从 netifd dump 解析后传入）。
+# controller 从 netifd dump 解析后传入）。mwan3 运行时经官方
+# 'mwan3 use <logical-if>' 启动 curl，与 daemon 路径保持一致。
 bind_target="$device"
 case "$source_ip" in
 	*.*) bind_target="$source_ip" ;;
 esac
+
+mwan3_prefix=""
+if [ -x /usr/sbin/mwan3 ] &&
+   [ -r /lib/mwan3/libwrap_mwan3_sockopt.so.1.0 ] &&
+   [ -x /etc/init.d/mwan3 ] &&
+   /etc/init.d/mwan3 running >/dev/null 2>&1 &&
+   [ -n "$logical_if" ]; then
+	mwan3_prefix="/usr/sbin/mwan3 use $logical_if"
+fi
 
 command -v curl >/dev/null 2>&1 || {
 	echo "error=curl_missing"
@@ -48,7 +59,7 @@ command -v curl >/dev/null 2>&1 || {
 }
 
 result="$(
-	curl \
+	$mwan3_prefix curl \
 		--interface "$bind_target" \
 		-sS \
 		--connect-timeout 5 \

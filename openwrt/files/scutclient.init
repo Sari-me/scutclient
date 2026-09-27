@@ -446,8 +446,12 @@ scutclient_start_instance() {
 		--log-max-size "$log_size" \
 		--log-keep "$log_keep"
 
-	[ "$log_file" -eq 1 ] && \
+	# log_file=0 时显式传 off，避免多个实例混写默认日志文件
+	if [ "$log_file" -eq 1 ]; then
 		procd_append_param command --log-file "/tmp/scutclient/$section.log"
+	else
+		procd_append_param command --log-file off
+	fi
 
 	# 按实例分发认证方式；dot1x 专属参数不允许传给 Portal 实例，反之亦然
 	if [ "$auth_method" = "portal" ]; then
