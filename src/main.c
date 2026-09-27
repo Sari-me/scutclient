@@ -8,6 +8,7 @@
 #include "runtime_status.h"
 #include "portal.h"
 #include <signal.h>
+#include <limits.h>
 
 struct sigaction sa_term;
 
@@ -49,6 +50,7 @@ static const struct option long_options[] = {
 	{"portal-js-version", required_argument, NULL, 1022},
 	{"portal-r3", required_argument, NULL, 1023},
 	{"route-isolation", required_argument, NULL, 1024},
+	{"mwan3-mark", required_argument, NULL, 1025},
 	{"debug", optional_argument, NULL, 'D'},
 	{"logoff", no_argument, NULL, 'o'},
 	{NULL, no_argument, NULL, 0}
@@ -90,6 +92,7 @@ void PrintHelp(const char * argn) {
 		"     --portal-js-version <ver> Dr.COM Web jsVersion override. Default 4.1.3.\n"
 		"     --portal-r3 <value> Dr.COM Web R3 override.\n"
 		"     --route-isolation <native|mwan3> How the instance is launched.\n"
+		"     --mwan3-mark <mark> Bypass mwan3 policy rules for Dr.COM UDP.\n"
 		" -D, --debug [level] Enable debug output (numeric level 0-5).\n"
 		" -o, --logoff\n",
 		argn);
@@ -112,6 +115,7 @@ int main(int argc, char *argv[]) {
 
 	const char *inst_name = NULL;
 	const char *loglev_str = NULL;
+	const char *mwan3_mark_str = NULL;
 	const char *logfile_str = NULL;
 	unsigned long logmax = 0;
 	int logkeep = 0;
@@ -262,6 +266,9 @@ int main(int argc, char *argv[]) {
 		case 1024:
 			RouteIsolation = optarg;
 			break;
+		case 1025:
+			mwan3_mark_str = optarg;
+			break;
 		case 'D':
 			if (optarg) {
 				tmpdbg = atoi(optarg);
@@ -368,6 +375,22 @@ int main(int argc, char *argv[]) {
 				RouteIsolation);
 		LogClose();
 		exit(-1);
+	}
+
+	if (mwan3_mark_str) {
+		char *end;
+		unsigned long mark;
+		errno = 0;
+		mark = strtoul(mwan3_mark_str, &end, 0);
+		if (errno || mwan3_mark_str[0] == '-' ||
+				end == mwan3_mark_str || *end || !mark ||
+				mark > UINT_MAX || AuthMethod != AUTH_DOT1X) {
+			RuntimeStatusSet("error", "mwan3_mark_invalid");
+			LogWrite(INIT, ERROR, "Invalid mwan3 mark '%s'!", mwan3_mark_str);
+			LogClose();
+			exit(-1);
+		}
+		Mwan3Mark = (unsigned int)mark;
 	}
 
 	/* Portal 后端：在线检测 + 自动重登录主循环（--logoff 时只注销一次） */

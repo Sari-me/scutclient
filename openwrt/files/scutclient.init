@@ -333,6 +333,7 @@ scutclient_start_instance() {
 	local auth_method portal_location
 	local route_isolation="auto"
 	local use_mwan3=0
+	local mwan3_mark=""
 	local log_level log_size log_keep log_system log_file
 	local ifname=""
 
@@ -412,7 +413,8 @@ scutclient_start_instance() {
 		expected_mac="$(uci -q get "$CONFIG.$section.macaddr" 2>/dev/null)"
 	fi
 
-	# 路由隔离：auto=mwan3 可用则经 mwan3 use 启动，否则 native。
+	# 路由隔离：portal 用 mwan3 use；dot1x 只给 UDP socket 设置
+	# mwan3 的默认 mark，避免策略分流，EAPOL 保持原生发包。
 	# mwan3 use 经 LD_PRELOAD wrapper 解析 DEVICE/SRCIP/FWMARK 固定出口
 	# （官方机制，无自造 fwmark）。
 	#
@@ -420,7 +422,6 @@ scutclient_start_instance() {
 	# dot1x 进程同时持有 PF_PACKET（EAPOL）与 AF_INET（UDP）socket，
 	# UDP 初始化后 wrapper 会对随后的 PF_PACKET sendto() 做 AF_INET
 	# bind 并直接 exit() 整个进程——因此 dot1x 绝不能整进程套 mwan3 use，
-	# 一律降级 native（PF_PACKET native + UDP device/source bind）。
 	# 仅纯 TCP/IP 的 portal 实例允许 mwan3 use。
 	config_get route_isolation "$section" route_isolation "auto"
 
@@ -436,24 +437,34 @@ scutclient_start_instance() {
 			if [ "$auth_method" = "portal" ]; then
 				use_mwan3=1
 			else
-				logger -t scutclient \
-					"$section: dot1x cannot use the mwan3 preload wrapper, using native binding"
-				route_isolation="native"
+				[ -r /var/run/mwan3/mmx_mask ] && \
+					read -r mwan3_mark < /var/run/mwan3/mmx_mask
 			fi
 			;;
 		*)
-			if scutclient_mwan3_available && [ "$auth_method" = "portal" ]; then
-				use_mwan3=1
+			if scutclient_mwan3_available; then
 				route_isolation="mwan3"
-			else
-				if scutclient_mwan3_available; then
-					logger -t scutclient \
-						"$section: dot1x cannot use the mwan3 preload wrapper, using native binding"
+				if [ "$auth_method" = "portal" ]; then
+					use_mwan3=1
+				else
+					[ -r /var/run/mwan3/mmx_mask ] && \
+						read -r mwan3_mark < /var/run/mwan3/mmx_mask
 				fi
+			else
 				route_isolation="native"
 			fi
 			;;
 	esac
+
+	if [ "$route_isolation" = "mwan3" ] && [ "$auth_method" = "dot1x" ]; then
+		[ -n "$mwan3_mark" ] || {
+			logger -t scutclient \
+				"Skip $section: mwan3 mark is unavailable for Dr.COM UDP"
+			return 1
+		}
+		logger -t scutclient \
+			"$section: applying mwan3 mark $mwan3_mark to Dr.COM UDP socket"
+	fi
 
 	logger -t scutclient \
 		"Starting $section on logical interface '$interface' ($ifname), route isolation: mode=$route_isolation"
@@ -547,6 +558,8 @@ scutclient_start_instance() {
 			procd_append_param command --portal-r3 "$portal_r3"
 	else
 		procd_append_param command --auth-method dot1x
+		[ -n "$mwan3_mark" ] && \
+			procd_append_param command --mwan3-mark "$mwan3_mark"
 		procd_append_param command \
 			--dns "$dns" \
 			--hostname "$hostname" \
@@ -718,7 +731,7 @@ scutclient_logoff_instance() {
 	# 保持与运行实例相同的 route isolation
 	case "$route_isolation" in
 		mwan3|auto)
-			if scutclient_mwan3_available; then
+			if [ "$auth_method" = "portal" ] && scutclient_mwan3_available; then
 				prefix="/usr/sbin/mwan3 use $interface"
 			fi
 			;;

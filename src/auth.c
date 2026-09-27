@@ -239,6 +239,17 @@ int auth_UDP_Init() {
 		return -1;
 	}
 
+	/* SO_BINDTODEVICE pins the egress device, but mwan3 still marks locally
+	 * generated packets in OUTPUT. Its default mark exempts this UDP socket
+	 * from policy routing; the PF_PACKET EAPOL socket remains untouched. */
+	if (Mwan3Mark && setsockopt(auth_udp_sock, SOL_SOCKET, SO_MARK,
+			&Mwan3Mark, sizeof(Mwan3Mark)) < 0) {
+		LogWrite(DRCOM, ERROR, "Set mwan3 mark on UDP socket failed: %s", strerror(errno));
+		close(auth_udp_sock);
+		auth_udp_sock = -1;
+		return -1;
+	}
+
 	bzero(&serv_addr, sizeof(serv_addr));
 	serv_addr.sin_family = AF_INET;
 
@@ -568,6 +579,7 @@ int Drcom_UDP_Handler(uint8_t *recv_data) {
 			encryptDrcomInfo(tailinfo);
 			data_len = Drcom_MISC_HEART_BEAT_01_TYPE_Setter(send_udp_data, recv_data);
 			isNeedHeartBeat = 1;
+			BaseHeartbeatTime = time(NULL);
 			LogWrite(DRCOM, INF, "Server: MISC_RESPONSE_INFO. Send MISC_HEART_BEAT_01.");
 			break;
 		case MISC_HEART_BEAT:
@@ -578,6 +590,7 @@ int Drcom_UDP_Handler(uint8_t *recv_data) {
 				break;
 			case MISC_HEART_BEAT_02_TYPE:
 				data_len = Drcom_MISC_HEART_BEAT_03_TYPE_Setter(send_udp_data, recv_data);
+				BaseHeartbeatTime = time(NULL);
 				LogWrite(DRCOM, INF, "Server: MISC_HEART_BEAT_02. Send MISC_HEART_BEAT_03.");
 				break;
 			case MISC_HEART_BEAT_04_TYPE:

@@ -46,6 +46,7 @@ int PortalPageIndex = 0;
 const char *PortalJsVersion = NULL;
 const char *PortalR3 = NULL;
 const char *RouteIsolation = "native";
+unsigned int Mwan3Mark = 0;
 
 unsigned char ExpectedMAC[6] = { 0 };
 int HaveExpectedMAC = 0;
@@ -74,4 +75,3 @@ int hexStrToByte(const char* source, unsigned char* dest, int bufLen) {
 	}
 	return i;
 }
-
