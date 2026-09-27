@@ -400,10 +400,11 @@ static int PortalCheckStatus(PortalStatusInfo *st) {
 			!st->server_ip[0])
 		json_get(json, "v46ip", st->server_ip, sizeof(st->server_ip));
 
-	/* ss4 非全零才是服务器返回的客户端 MAC；本地 MAC 另行获取 */
+	/* ss4 非全零才是服务器返回的客户端 MAC；
+	 * 无效则留空（登录使用本地 netdev 真实 MAC，不回退 ss1 以免语义失真） */
 	json_get(json, "ss4", st->server_mac, sizeof(st->server_mac));
 	if (!st->server_mac[0] || !strcmp(st->server_mac, "000000000000"))
-		json_get(json, "ss1", st->server_mac, sizeof(st->server_mac));
+		st->server_mac[0] = 0;
 
 	if (st->server_ip[0] && PortalCtx.source_ipv4[0] &&
 			strcmp(st->server_ip, PortalCtx.source_ipv4) != 0)

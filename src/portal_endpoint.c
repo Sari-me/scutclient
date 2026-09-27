@@ -166,13 +166,16 @@ int PortalBuildEportalLoginURL(const PortalLocationInfo *loc,
 
 	curl_easy_cleanup(handle);
 
+	/* ePortal 登录端口与 Location 端口无关：
+	 * authority 必须用 scheme://host:eport 重建，
+	 * 不能在 origin（可能已带显式端口）上再追加 ':eport' */
 	n = snprintf(out, outlen,
-			"%s:%u/eportal/portal/login?callback=dr&login_method=1"
+			"%s://%s:%u/eportal/portal/login?callback=dr&login_method=1"
 			"&user_account=%s&user_password=%s"
 			"&wlan_user_ip=%s&wlan_user_ipv6=&wlan_user_mac=%s"
 			"&wlan_ac_ip=&wlan_ac_name=&terminal_type=1"
 			"&jsVersion=" PORTAL_JS_VERSION "&lang=zh",
-			loc->origin, eport,
+			loc->scheme, loc->host, eport,
 			enc_account, enc_password,
 			ip ? ip : "", mac ? mac : "");
 
