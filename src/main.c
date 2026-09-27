@@ -92,7 +92,7 @@ void PrintHelp(const char * argn) {
 		"     --portal-js-version <ver> Dr.COM Web jsVersion override. Default 4.1.3.\n"
 		"     --portal-r3 <value> Dr.COM Web R3 override.\n"
 		"     --route-isolation <native|mwan3> How the instance is launched.\n"
-		"     --mwan3-mark <mark> Bypass mwan3 policy rules for Dr.COM UDP.\n"
+		"     --mwan3-mark <mark> Route Dr.COM UDP through its mwan3 WAN table.\n"
 		" -D, --debug [level] Enable debug output (numeric level 0-5).\n"
 		" -o, --logoff\n",
 		argn);

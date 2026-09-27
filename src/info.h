@@ -64,7 +64,7 @@ extern const char *PortalR3;           /* Dr.COM Web R3 override */
 
 /* Route isolation resolved by the init script: "native" or "mwan3". */
 extern const char *RouteIsolation;
-/* mwan3's default firewall mark, applied only to the Dr.COM UDP socket. */
+/* mwan3 interface mark, applied only to the Dr.COM UDP socket. */
 extern unsigned int Mwan3Mark;
 
 /* Expected interface MAC (mac spoof verification). */

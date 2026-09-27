@@ -312,7 +312,7 @@ scutclient_apply_network() {
 	return 0
 }
 
-# mwan3 兼容层：仅使用官方 mwan3 use 机制，不在 C 中自造 fwmark
+# mwan3 兼容层：portal 使用官方 mwan3 use；dot1x 从官方接口表计算 mark
 scutclient_mwan3_available() {
 	[ -x /usr/sbin/mwan3 ] || return 1
 	[ -r /lib/mwan3/libwrap_mwan3_sockopt.so.1.0 ] || return 1
@@ -320,6 +320,24 @@ scutclient_mwan3_available() {
 	/etc/init.d/mwan3 running >/dev/null 2>&1 || return 1
 	return 0
 }
+
+# 使用 mwan3 自身的接口序号和 mask 算法，得到该 WAN 路由表的 mark。
+# 在子 shell 中加载 mwan3 UCI，避免覆盖当前 scutclient 配置。
+scutclient_mwan3_iface_mark() (
+	local interface="$1" mask="" id="" family="" enabled=0
+	[ -r /var/run/mwan3/mmx_mask ] || return 1
+	[ -r /lib/mwan3/mwan3.sh ] || return 1
+	read -r mask < /var/run/mwan3/mmx_mask
+	[ -n "$mask" ] || return 1
+	. /lib/mwan3/mwan3.sh
+	config_load mwan3
+	config_get family "$interface" family ipv4
+	config_get_bool enabled "$interface" enabled 0
+	[ "$family" = "ipv4" ] && [ "$enabled" -eq 1 ] || return 1
+	mwan3_get_iface_id id "$interface"
+	[ -n "$id" ] || return 1
+	mwan3_id2mask "$id" "$mask"
+)
 
 # Phase B：只负责解析当前 netdev、复核独占与 MAC，并创建本实例进程。
 # 不生成 MAC、不改 network/wireless、不 reload 网络。
@@ -334,6 +352,7 @@ scutclient_start_instance() {
 	local route_isolation="auto"
 	local use_mwan3=0
 	local mwan3_mark=""
+	local start_ip="" route=""
 	local log_level log_size log_keep log_system log_file
 	local ifname=""
 
@@ -413,8 +432,8 @@ scutclient_start_instance() {
 		expected_mac="$(uci -q get "$CONFIG.$section.macaddr" 2>/dev/null)"
 	fi
 
-	# 路由隔离：portal 用 mwan3 use；dot1x 只给 UDP socket 设置
-	# mwan3 的默认 mark，避免策略分流，EAPOL 保持原生发包。
+	# 路由隔离：portal 用 mwan3 use；dot1x 的 UDP socket 使用绑定 WAN
+	# 对应的 mark，查该 WAN 路由表，EAPOL 保持原生发包。
 	# mwan3 use 经 LD_PRELOAD wrapper 解析 DEVICE/SRCIP/FWMARK 固定出口
 	# （官方机制，无自造 fwmark）。
 	#
@@ -436,9 +455,6 @@ scutclient_start_instance() {
 			fi
 			if [ "$auth_method" = "portal" ]; then
 				use_mwan3=1
-			else
-				[ -r /var/run/mwan3/mmx_mask ] && \
-					read -r mwan3_mark < /var/run/mwan3/mmx_mask
 			fi
 			;;
 		*)
@@ -446,9 +462,6 @@ scutclient_start_instance() {
 				route_isolation="mwan3"
 				if [ "$auth_method" = "portal" ]; then
 					use_mwan3=1
-				else
-					[ -r /var/run/mwan3/mmx_mask ] && \
-						read -r mwan3_mark < /var/run/mwan3/mmx_mask
 				fi
 			else
 				route_isolation="native"
@@ -457,21 +470,34 @@ scutclient_start_instance() {
 	esac
 
 	if [ "$route_isolation" = "mwan3" ] && [ "$auth_method" = "dot1x" ]; then
-		[ -n "$mwan3_mark" ] || {
+		mwan3_mark="$(scutclient_mwan3_iface_mark "$interface")" || {
 			logger -t scutclient \
-				"Skip $section: mwan3 mark is unavailable for Dr.COM UDP"
+				"Skip $section: mwan3 interface mark is unavailable for '$interface'"
 			return 1
 		}
+		network_get_ipaddr start_ip "$interface" 2>/dev/null || start_ip=""
+		[ -n "$start_ip" ] || {
+			logger -t scutclient "Skip $section: no IPv4 address on '$interface'"
+			return 1
+		}
+		route="$(ip -4 route get "$server_auth_ip" from "$start_ip" mark "$mwan3_mark" 2>/dev/null)"
+		case " $route " in
+			*" dev $ifname "*) ;;
+			*)
+				logger -t scutclient \
+					"Skip $section: mwan3 mark $mwan3_mark routes $server_auth_ip away from '$ifname': $route"
+				return 1
+				;;
+		esac
 		logger -t scutclient \
-			"$section: applying mwan3 mark $mwan3_mark to Dr.COM UDP socket"
+			"$section: Dr.COM UDP uses mwan3 mark $mwan3_mark: $route"
 	fi
 
 	logger -t scutclient \
 		"Starting $section on logical interface '$interface' ($ifname), route isolation: mode=$route_isolation"
 
 	# 记录启动时的接口 IPv4，供 hotplug ifupdate 判断地址是否真的变化
-	local start_ip=""
-	network_get_ipaddr start_ip "$interface" 2>/dev/null || start_ip=""
+	[ -n "$start_ip" ] || network_get_ipaddr start_ip "$interface" 2>/dev/null || start_ip=""
 	mkdir -p /var/run/scutclient
 	printf '%s\n' "$start_ip" > "/var/run/scutclient/$section.source-ip"
 

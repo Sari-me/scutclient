@@ -96,7 +96,7 @@ scutclient --username <username> --password <password> [options...]
      --log-max-size <bytes> Rotate the log beyond this size. Default 262144.
      --log-keep <n> Rotated log files to keep. Default 2.
      --auth-method <dot1x|portal> Authentication method. Default dot1x.
-     --mwan3-mark <mark> Bypass mwan3 policy rules for Dr.COM UDP.
+     --mwan3-mark <mark> Route Dr.COM UDP through its mwan3 WAN table.
      --portal-location <url> Captive portal Location URL (portal mode).
      --portal-suffix <suffix> Appended to the account, e.g. @dx (portal).
      --portal-connect-timeout <sec> Portal connect timeout. Default 5.

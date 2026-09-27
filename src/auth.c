@@ -239,9 +239,9 @@ int auth_UDP_Init() {
 		return -1;
 	}
 
-	/* SO_BINDTODEVICE pins the egress device, but mwan3 still marks locally
-	 * generated packets in OUTPUT. Its default mark exempts this UDP socket
-	 * from policy routing; the PF_PACKET EAPOL socket remains untouched. */
+	/* SO_BINDTODEVICE pins the egress device. The WAN-specific mwan3 mark
+	 * selects that WAN's routing table and gateway for locally generated UDP;
+	 * the PF_PACKET EAPOL socket remains untouched. */
 	if (Mwan3Mark && setsockopt(auth_udp_sock, SOL_SOCKET, SO_MARK,
 			&Mwan3Mark, sizeof(Mwan3Mark)) < 0) {
 		LogWrite(DRCOM, ERROR, "Set mwan3 mark on UDP socket failed: %s", strerror(errno));
