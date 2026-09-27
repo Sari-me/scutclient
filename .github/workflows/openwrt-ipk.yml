@@ -81,15 +81,18 @@ jobs:
                      log-level log-file log-max-size log-keep \
                      auth-method portal-location portal-suffix \
                      portal-connect-timeout portal-timeout \
-                     portal-check-interval portal-tls-verify; do
+                     portal-check-interval portal-tls-verify \
+                     portal-http-port portal-https-port; do
             grep -q -- "\"$opt\"" src/main.c || {
               echo "Missing CLI option: --$opt"
               exit 1
             }
           done
 
-          # portal 后端必须被编译进二进制
+          # portal 后端必须被编译进二进制（URL 模型 + endpoint builder）
           grep -q 'portal.c' CMakeLists.txt
+          grep -q 'portal_url.c' CMakeLists.txt
+          grep -q 'portal_endpoint.c' CMakeLists.txt
           grep -q 'CURL' CMakeLists.txt
 
           # MAC / portal probe helper 必须打包进 ipk

@@ -102,15 +102,22 @@ scutclient --username <username> --password <password> [options...]
      --portal-timeout <sec> Portal request timeout. Default 10.
      --portal-check-interval <sec> Portal online check interval. Default 15.
      --portal-tls-verify <0|1> Verify https portal certificates. Default 1.
+     --portal-http-port <port> ePortal login port for http Locations. Default 801.
+     --portal-https-port <port> ePortal login port for https Locations. Default 802.
  -D, --debug [level] Enable debug output (numeric level 0-5).
  -o, --logoff
 ```
 
 `--auth-method portal` runs the Web Portal backend (Dr.COM 哆点 4.x
-eportal/Radius web login): it checks `/drcom/chkstatus`, logs in through
-`/eportal/portal/login` on port 801 with the saved Location's host, keeps
-the session alive with an online check every `--portal-check-interval`
-seconds and re-logins automatically when the check reports offline. All
+eportal/Radius web login). The detected Location is the runtime source of
+truth: it is parsed in full (scheme, host, explicit port, path, query) and
+every API endpoint is derived from it — kernel `chkstatus`/`logout` follow
+the Location origin, ePortal login uses the configurable ePortal port
+(801 for http / 802 for https Locations, override with
+`--portal-http-port` / `--portal-https-port` or the per-instance
+`portal_http_port` / `portal_https_port` UCI options). The session is kept
+alive with an online check every `--portal-check-interval` seconds and
+re-login happens automatically when the check reports offline. All
 requests are bound to the instance netdev; `--logoff` performs a portal
 logout for portal instances.
 

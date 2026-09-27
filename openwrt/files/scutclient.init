@@ -419,12 +419,15 @@ scutclient_start_instance() {
 	if [ "$auth_method" = "portal" ]; then
 		local portal_suffix portal_connect_timeout portal_timeout
 		local portal_check_interval portal_tls_verify
+		local portal_http_port portal_https_port
 
 		config_get portal_suffix "$section" portal_suffix ""
 		config_get portal_connect_timeout "$section" portal_connect_timeout "5"
 		config_get portal_timeout "$section" portal_timeout "10"
 		config_get portal_check_interval "$section" portal_check_interval "15"
 		config_get_bool portal_tls_verify "$section" portal_tls_verify 1
+		config_get portal_http_port "$section" portal_http_port "801"
+		config_get portal_https_port "$section" portal_https_port "802"
 
 		procd_append_param command \
 			--auth-method portal \
@@ -432,7 +435,9 @@ scutclient_start_instance() {
 			--portal-connect-timeout "$portal_connect_timeout" \
 			--portal-timeout "$portal_timeout" \
 			--portal-check-interval "$portal_check_interval" \
-			--portal-tls-verify "$portal_tls_verify"
+			--portal-tls-verify "$portal_tls_verify" \
+			--portal-http-port "$portal_http_port" \
+			--portal-https-port "$portal_https_port"
 
 		[ -n "$portal_suffix" ] && \
 			procd_append_param command --portal-suffix "$portal_suffix"
