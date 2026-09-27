@@ -113,6 +113,59 @@ scutclient_instance_type() {
 	uci -q show "$CONFIG.$1" 2>/dev/null | head -n 1 | cut -d= -f2
 }
 
+# WAN 独占：启动前收集所有启用实例占用的 logical interface 与
+# 解析后的真实 netdev。"netdev:section" 空格分隔。
+USED_NETWORKS=""
+USED_DEVICES=""
+
+scutclient_collect_usage() {
+	local section="$1"
+	local enabled interface device=""
+
+	config_get_bool enabled "$section" enabled 1
+	[ "$enabled" -eq 1 ] || return 0
+
+	config_get interface "$section" interface "wan"
+
+	USED_NETWORKS="$USED_NETWORKS $interface:$section"
+
+	device="$(scutclient_resolve_device "$interface")"
+	[ -n "$device" ] && USED_DEVICES="$USED_DEVICES $device:$section"
+
+	return 0
+}
+
+scutclient_check_exclusive() {
+	local interface="$1"
+	local device="$2"
+	local section="$3"
+	local entry owner
+
+	for entry in $USED_NETWORKS; do
+		[ "${entry%%:*}" = "$interface" ] || continue
+		owner="${entry#*:}"
+		[ "$owner" = "$section" ] || {
+			logger -t scutclient \
+				"Skip $section: logical interface '$interface' already used by '$owner'"
+			return 1
+		}
+	done
+
+	[ -n "$device" ] || return 0
+
+	for entry in $USED_DEVICES; do
+		[ "${entry%%:*}" = "$device" ] || continue
+		owner="${entry#*:}"
+		[ "$owner" = "$section" ] || {
+			logger -t scutclient \
+				"Skip $section: device '$device' already used by '$owner'"
+			return 1
+		}
+	done
+
+	return 0
+}
+
 scutclient_start_instance() {
 	local section="$1"
 	local enabled name username password interface
@@ -160,6 +213,8 @@ scutclient_start_instance() {
 			"Skip $section: unable to resolve network interface '$interface'"
 		return 1
 	}
+
+	scutclient_check_exclusive "$interface" "$ifname" "$section" || return 1
 
 	logger -t scutclient \
 		"Starting $section on logical interface '$interface' ($ifname)"
@@ -216,6 +271,10 @@ start_service() {
 		logger -t scutclient "Service disabled by UCI"
 		return 0
 	}
+
+	USED_NETWORKS=""
+	USED_DEVICES=""
+	config_foreach scutclient_collect_usage scutclient
 
 	config_foreach scutclient_start_instance scutclient
 }
