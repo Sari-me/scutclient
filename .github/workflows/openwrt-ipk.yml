@@ -66,6 +66,7 @@ jobs:
           test -f openwrt/files/scutclient.init
           test -f openwrt/files/scutclient.hotplug
           test -f openwrt/files/scutclient-mac
+          test -f openwrt/files/scutclient-portal-probe
 
           grep -q '^PKG_NAME:=scutclient$' openwrt/Makefile
 
@@ -77,19 +78,22 @@ jobs:
           # init / README 传给 C 程序的 CLI 必须真实存在于 main.c
           for opt in instance expected-mac heartbeat-interval \
                      heartbeat-timeout eap-timeout eap-retries \
-                     log-level log-file log-max-size log-keep; do
+                     log-level log-file log-max-size log-keep \
+                     auth-method portal-location; do
             grep -q -- "\"$opt\"" src/main.c || {
               echo "Missing CLI option: --$opt"
               exit 1
             }
           done
 
-          # MAC helper 必须打包进 ipk
+          # MAC / portal probe helper 必须打包进 ipk
           grep -q 'scutclient-mac' openwrt/Makefile
+          grep -q 'scutclient-portal-probe' openwrt/Makefile
 
           sh -n openwrt/files/scutclient.init
           sh -n openwrt/files/scutclient.hotplug
           sh -n openwrt/files/scutclient-mac
+          sh -n openwrt/files/scutclient-portal-probe
 
       - name: Prepare OpenWrt feed
         shell: bash
@@ -123,6 +127,9 @@ jobs:
 
           cp openwrt/files/scutclient-mac \
             .ci-feed/scutclient/files/scutclient-mac
+
+          cp openwrt/files/scutclient-portal-probe \
+            .ci-feed/scutclient/files/scutclient-portal-probe
 
           echo "===== CI feed ====="
           find .ci-feed -maxdepth 4 -type f -print

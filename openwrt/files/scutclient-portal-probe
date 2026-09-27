@@ -1,0 +1,65 @@
+#!/bin/sh
+# scutclient-portal-probe - interface-bound captive portal Location probe.
+#
+# Usage: scutclient-portal-probe <real-netdev>
+#
+# Performs GET http://connectivitycheck.gstatic.com/generate_204 bound to
+# the given netdev WITHOUT following redirects (the first-hop Location is
+# exactly what we want) and prints:
+#
+#   http_code=<HTTP status>
+#   location=<resolved redirect target, empty when none>
+#
+# It never touches UCI, never reloads networking and never logs in; the
+# LuCI controller owns interpretation and persistence.
+#
+# Exit codes: 0 probe executed, 2 invalid device, 3 device not found,
+# 4 curl failed.
+
+PROBE_URL="http://connectivitycheck.gstatic.com/generate_204"
+
+device="$1"
+
+case "$device" in
+	""|*[!A-Za-z0-9_.:-]*)
+		echo "error=invalid_device"
+		exit 2
+		;;
+esac
+
+[ -e "/sys/class/net/$device" ] || {
+	echo "error=device_not_found"
+	exit 3
+}
+
+command -v curl >/dev/null 2>&1 || {
+	echo "error=curl_missing"
+	exit 5
+}
+
+result="$(
+	curl \
+		--interface "$device" \
+		-sS \
+		--connect-timeout 5 \
+		--max-time 8 \
+		--max-redirs 0 \
+		-o /dev/null \
+		-w '%{http_code}\n%{redirect_url}\n' \
+		"$PROBE_URL" 2>/dev/null
+)"
+
+rc=$?
+
+[ "$rc" -eq 0 ] || {
+	echo "error=curl_failed"
+	echo "curl_code=$rc"
+	exit 4
+}
+
+http_code="$(printf '%s\n' "$result" | sed -n '1p')"
+location="$(printf '%s\n' "$result" | sed -n '2p')"
+
+echo "http_code=$http_code"
+echo "location=$location"
+exit 0
