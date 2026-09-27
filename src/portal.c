@@ -510,6 +510,8 @@ static PortalLoginResult portal_login_eportal(char *msg, size_t msglen) {
 	char json[PORTAL_BODY_MAX];
 	char account[PORTAL_ENC_MAX];
 	char result[16];
+	char ret_code[16];
+	char msga[PORTAL_VALUE_MAX];
 	PortalHttpResponse response;
 
 	portal_build_account(account, sizeof(account));
@@ -541,7 +543,21 @@ static PortalLoginResult portal_login_eportal(char *msg, size_t msglen) {
 	if (strcmp(result, "1") == 0)
 		return PORTAL_LOGIN_OK;
 
-	if (json_get(json, "msg", msg, msglen) != 0 || !msg[0])
+	msg[0] = 0;
+	ret_code[0] = 0;
+	msga[0] = 0;
+	json_get(json, "msg", msg, msglen);
+	json_get(json, "ret_code", ret_code, sizeof(ret_code));
+	json_get(json, "msga", msga, sizeof(msga));
+
+	LogWrite(DRCOM, ERROR,
+			"Portal login failed: backend=eportal result=%s ret_code=%s msg=%s msga=%s",
+			result[0] ? result : "?",
+			ret_code[0] ? ret_code : "?", msg, msga);
+
+	if (!msg[0] && msga[0])
+		snprintf(msg, msglen, "%s", msga);
+	if (!msg[0])
 		snprintf(msg, msglen, "login_failed");
 
 	return PORTAL_LOGIN_AUTH_FAILED;
