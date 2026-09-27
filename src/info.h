@@ -27,6 +27,12 @@ extern char *Hash;
 extern unsigned char Version[64];
 extern int Version_len;
 
+/* Per-instance tunables (CLI overridable) */
+extern int HBInterval;   /* Dr.com UDP heartbeat interval, seconds */
+extern int HBTimeout;    /* Dr.com UDP heartbeat timeout, seconds */
+extern int EAPTimeout;   /* 802.1X receive timeout, seconds */
+extern int EAPRetries;   /* 802.1X retry times */
+
 int hexStrToByte(const char* source, unsigned char* dest, int bufLen);
 #endif
 

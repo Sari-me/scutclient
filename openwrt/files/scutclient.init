@@ -7,59 +7,17 @@ USE_PROCD=1
 PROG="/usr/bin/scutclient"
 CONFIG="scutclient"
 
-EXTRA_COMMANDS="logoff"
+EXTRA_COMMANDS="start_instance stop_instance restart_instance logoff_instance logoff"
 EXTRA_HELP="
-	logoff	Send EAPOL logoff using configured interface
+	logoff		Send EAPOL logoff for every instance
+	start_instance <id>	Start one scutclient instance
+	stop_instance <id>	Stop one scutclient instance
+	restart_instance <id>	Restart one scutclient instance
+	logoff_instance <id>	Send EAPOL logoff for one instance
 "
 
 . /lib/functions.sh
 . /lib/functions/network.sh
-
-SC_ENABLE=0
-SC_DEBUG=0
-
-SC_DNS="222.201.130.30"
-SC_HOSTNAME="Lenovo-PC"
-SC_SERVER_AUTH_IP="202.38.210.131"
-SC_VERSION="4472434f4d0096022a"
-SC_HASH="2ec15ad258aee9604b18f2f8114da38db16efd00"
-SC_ONLINEHOOK=""
-SC_OFFLINEHOOK=""
-SC_NETTIME=""
-
-scutclient_reset_globals() {
-	SC_ENABLE=0
-	SC_DEBUG=0
-
-	SC_DNS="222.201.130.30"
-	SC_HOSTNAME="Lenovo-PC"
-	SC_SERVER_AUTH_IP="202.38.210.131"
-	SC_VERSION="4472434f4d0096022a"
-	SC_HASH="2ec15ad258aee9604b18f2f8114da38db16efd00"
-	SC_ONLINEHOOK=""
-	SC_OFFLINEHOOK=""
-	SC_NETTIME=""
-}
-
-scutclient_load_option() {
-	local section="$1"
-
-	config_get_bool SC_ENABLE "$section" enable 0
-	config_get_bool SC_DEBUG "$section" debug 0
-}
-
-scutclient_load_drcom() {
-	local section="$1"
-
-	config_get SC_DNS "$section" dns "222.201.130.30"
-	config_get SC_HOSTNAME "$section" hostname "Lenovo-PC"
-	config_get SC_SERVER_AUTH_IP "$section" server_auth_ip "202.38.210.131"
-	config_get SC_VERSION "$section" version "4472434f4d0096022a"
-	config_get SC_HASH "$section" hash "2ec15ad258aee9604b18f2f8114da38db16efd00"
-	config_get SC_ONLINEHOOK "$section" onlinehook ""
-	config_get SC_OFFLINEHOOK "$section" offlinehook ""
-	config_get SC_NETTIME "$section" nettime ""
-}
 
 scutclient_resolve_device() {
 	local configured="$1"
@@ -86,34 +44,122 @@ scutclient_resolve_device() {
 	return 0
 }
 
+# 旧版配置（全局 config scutclient 'account' + config drcom 'settings'）
+# 迁移为单实例 config scutclient 'default'。config_version 防止重复迁移。
+scutclient_migrate() {
+	local cv=""
+	local account_type=""
+
+	cv="$(uci -q get "$CONFIG.main.config_version" 2>/dev/null)"
+	[ "$cv" = "2" ] && return 0
+
+	# 判断是否存在旧版账号节（存在任意 scutclient 类型节时才需要迁移）；
+	# drcom 节存在而 config_version 缺失，视为旧布局。
+	account_type="$(uci -q show "$CONFIG" 2>/dev/null | \
+		grep -m1 "=scutclient$" | cut -d. -f2 | cut -d= -f1)"
+
+	if [ -z "$account_type" ]; then
+		uci -q set "$CONFIG.main.config_version=2"
+		uci -q commit "$CONFIG"
+		return 0
+	fi
+
+	local username password interface
+	local dns hostname server_auth_ip version hash
+	local nettime onlinehook offlinehook debug enable
+
+	username="$(uci -q get "$CONFIG.$account_type.username" 2>/dev/null)"
+	password="$(uci -q get "$CONFIG.$account_type.password" 2>/dev/null)"
+	interface="$(uci -q get "$CONFIG.$account_type.interface" 2>/dev/null)"
+
+	dns="$(uci -q get "$CONFIG.settings.dns" 2>/dev/null)"
+	hostname="$(uci -q get "$CONFIG.settings.hostname" 2>/dev/null)"
+	server_auth_ip="$(uci -q get "$CONFIG.settings.server_auth_ip" 2>/dev/null)"
+	version="$(uci -q get "$CONFIG.settings.version" 2>/dev/null)"
+	hash="$(uci -q get "$CONFIG.settings.hash" 2>/dev/null)"
+	nettime="$(uci -q get "$CONFIG.settings.nettime" 2>/dev/null)"
+	onlinehook="$(uci -q get "$CONFIG.settings.onlinehook" 2>/dev/null)"
+	offlinehook="$(uci -q get "$CONFIG.settings.offlinehook" 2>/dev/null)"
+
+	debug="$(uci -q get "$CONFIG.main.debug" 2>/dev/null)"
+	enable="$(uci -q get "$CONFIG.main.enable" 2>/dev/null)"
+
+	uci -q set "$CONFIG.default=scutclient"
+	uci -q set "$CONFIG.default.enabled=1"
+	uci -q set "$CONFIG.default.name=WAN"
+	[ -n "$username" ] && uci -q set "$CONFIG.default.username=$username"
+	[ -n "$password" ] && uci -q set "$CONFIG.default.password=$password"
+	[ -n "$interface" ] && uci -q set "$CONFIG.default.interface=$interface"
+	[ -n "$server_auth_ip" ] && uci -q set "$CONFIG.default.server_auth_ip=$server_auth_ip"
+	[ -n "$dns" ] && uci -q set "$CONFIG.default.dns=$dns"
+	[ -n "$hostname" ] && uci -q set "$CONFIG.default.hostname=$hostname"
+	[ -n "$version" ] && uci -q set "$CONFIG.default.version=$version"
+	[ -n "$hash" ] && uci -q set "$CONFIG.default.hash=$hash"
+	[ -n "$nettime" ] && uci -q set "$CONFIG.default.nettime=$nettime"
+	[ -n "$onlinehook" ] && uci -q set "$CONFIG.default.onlinehook=$onlinehook"
+	[ -n "$offlinehook" ] && uci -q set "$CONFIG.default.offlinehook=$offlinehook"
+	[ "$debug" = "1" ] && uci -q set "$CONFIG.default.log_level=debug"
+
+	uci -q delete "$CONFIG.settings" 2>/dev/null
+	uci -q delete "$CONFIG.$account_type" 2>/dev/null
+	uci -q set "$CONFIG.main.enable=${enable:-0}"
+	uci -q set "$CONFIG.main.config_version=2"
+	uci -q commit "$CONFIG"
+
+	logger -t scutclient "Migrated legacy configuration to instance 'default'"
+}
+
+scutclient_instance_type() {
+	uci -q show "$CONFIG.$1" 2>/dev/null | head -n 1 | cut -d= -f2
+}
+
 scutclient_start_instance() {
 	local section="$1"
-	local username=""
-	local password=""
-	local interface="wan"
+	local enabled name username password interface
+	local dns hostname server_auth_ip version hash
+	local nettime onlinehook offlinehook
+	local heartbeat_interval heartbeat_timeout eap_timeout eap_retries
 	local ifname=""
 
+	config_get_bool enabled "$section" enabled 1
+	[ "$enabled" -eq 1 ] || return 0
+
+	config_get name "$section" name "$section"
 	config_get username "$section" username ""
 	config_get password "$section" password ""
 	config_get interface "$section" interface "wan"
 
-	if [ -z "$username" ]; then
+	config_get dns "$section" dns "222.201.130.30"
+	config_get hostname "$section" hostname "Lenovo-PC"
+	config_get server_auth_ip "$section" server_auth_ip "202.38.210.131"
+	config_get version "$section" version "4472434f4d0096022a"
+	config_get hash "$section" hash "2ec15ad258aee9604b18f2f8114da38db16efd00"
+	config_get nettime "$section" nettime ""
+	config_get onlinehook "$section" onlinehook ""
+	config_get offlinehook "$section" offlinehook ""
+
+	config_get heartbeat_interval "$section" heartbeat_interval "12"
+	config_get heartbeat_timeout "$section" heartbeat_timeout "2"
+	config_get eap_timeout "$section" eap_timeout "1"
+	config_get eap_retries "$section" eap_retries "3"
+
+	[ -n "$username" ] || {
 		logger -t scutclient "Skip $section: username is empty"
 		return 1
-	fi
+	}
 
-	if [ -z "$password" ]; then
+	[ -n "$password" ] || {
 		logger -t scutclient "Skip $section: password is empty"
 		return 1
-	fi
+	}
 
 	ifname="$(scutclient_resolve_device "$interface")"
 
-	if [ -z "$ifname" ]; then
+	[ -n "$ifname" ] || {
 		logger -t scutclient \
 			"Skip $section: unable to resolve network interface '$interface'"
 		return 1
-	fi
+	}
 
 	logger -t scutclient \
 		"Starting $section on logical interface '$interface' ($ifname)"
@@ -126,23 +172,30 @@ scutclient_start_instance() {
 		--username "$username" \
 		--password "$password" \
 		--iface "$ifname" \
-		--dns "$SC_DNS" \
-		--hostname "$SC_HOSTNAME" \
-		--udp-server "$SC_SERVER_AUTH_IP" \
-		--cli-version "$SC_VERSION" \
-		--hash "$SC_HASH"
+		--dns "$dns" \
+		--hostname "$hostname" \
+		--udp-server "$server_auth_ip"
 
-	[ "$SC_DEBUG" -eq 1 ] && \
-		procd_append_param command --debug
+	[ -n "$version" ] && \
+		procd_append_param command --cli-version "$version"
 
-	[ -n "$SC_ONLINEHOOK" ] && \
-		procd_append_param command --online-hook "$SC_ONLINEHOOK"
+	[ -n "$hash" ] && \
+		procd_append_param command --hash "$hash"
 
-	[ -n "$SC_OFFLINEHOOK" ] && \
-		procd_append_param command --offline-hook "$SC_OFFLINEHOOK"
+	[ -n "$nettime" ] && \
+		procd_append_param command --net-time "$nettime"
 
-	[ -n "$SC_NETTIME" ] && \
-		procd_append_param command --net-time "$SC_NETTIME"
+	[ -n "$onlinehook" ] && \
+		procd_append_param command --online-hook "$onlinehook"
+
+	[ -n "$offlinehook" ] && \
+		procd_append_param command --offline-hook "$offlinehook"
+
+	procd_append_param command \
+		--heartbeat-interval "$heartbeat_interval" \
+		--heartbeat-timeout "$heartbeat_timeout" \
+		--eap-timeout "$eap_timeout" \
+		--eap-retries "$eap_retries"
 
 	procd_set_param netdev "$ifname"
 	procd_set_param stdout 1
@@ -152,13 +205,14 @@ scutclient_start_instance() {
 }
 
 start_service() {
-	scutclient_reset_globals
+	scutclient_migrate
 
 	config_load "$CONFIG"
-	config_foreach scutclient_load_option option
-	config_foreach scutclient_load_drcom drcom
 
-	[ "$SC_ENABLE" -eq 1 ] || {
+	local enable=0
+	config_get_bool enable "main" enable 0
+
+	[ "$enable" -eq 1 ] || {
 		logger -t scutclient "Service disabled by UCI"
 		return 0
 	}
@@ -205,11 +259,11 @@ scutclient_logoff_instance() {
 
 	ifname="$(scutclient_resolve_device "$interface")"
 
-	if [ -z "$ifname" ]; then
+	[ -n "$ifname" ] || {
 		logger -t scutclient \
 			"Unable to log off: cannot resolve '$interface'"
 		return 1
-	fi
+	}
 
 	"$PROG" --iface "$ifname" --logoff
 }
@@ -217,4 +271,50 @@ scutclient_logoff_instance() {
 logoff() {
 	config_load "$CONFIG"
 	config_foreach scutclient_logoff_instance scutclient
+}
+
+scutclient_check_instance() {
+	local section="$1"
+
+	[ -n "$section" ] || return 1
+	[ "$(scutclient_instance_type "$section")" = "scutclient" ] || {
+		logger -t scutclient "No such scutclient instance: '$section'"
+		return 1
+	}
+	return 0
+}
+
+start_instance() {
+	local section="$1"
+
+	scutclient_check_instance "$section" || return 1
+
+	config_load "$CONFIG"
+	scutclient_start_instance "$section"
+}
+
+stop_instance() {
+	local section="$1"
+
+	scutclient_check_instance "$section" || return 1
+
+	procd_kill "$CONFIG" "$section"
+}
+
+restart_instance() {
+	local section="$1"
+
+	scutclient_check_instance "$section" || return 1
+
+	stop_instance "$section"
+	start_instance "$section"
+}
+
+logoff_instance() {
+	local section="$1"
+
+	scutclient_check_instance "$section" || return 1
+
+	config_load "$CONFIG"
+	scutclient_logoff_instance "$section"
 }

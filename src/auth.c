@@ -5,12 +5,7 @@
 struct in_addr local_ipaddr;
 uint8_t MAC[6];
 
-#define DRCOM_UDP_HEARTBEAT_DELAY  12 // Drcom客户端心跳延时秒数，默认12秒
-#define DRCOM_UDP_HEARTBEAT_TIMEOUT 2 // Drcom客户端心跳超时秒数
-#define DRCOM_UDP_RECV_DELAY  2 // Drcom客户端收UDP报文延时秒数，默认2秒
 #define AUTH_8021X_LOGOFF_DELAY 500000 // 客户端退出登录收包等待时间 0.5秒（50万微秒)
-#define AUTH_8021X_RECV_DELAY  1 // 客户端收8021x报文延时秒数，默认1秒
-#define AUTH_8021X_RECV_TIMES  3 // 客户端收8021x报文重试次数
 
 /* 静态常量*/
 const static uint8_t BroadcastAddr[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff }; // 广播MAC地址
@@ -24,7 +19,7 @@ static uint8_t send_udp_data[ETH_FRAME_LEN];
 static uint8_t recv_udp_data[ETH_FRAME_LEN];
 static int send_udp_data_len = 0; // 用于存放发送udp报文的变量的长度
 static int resev = 0; // 是否收到了第一帧报文的标志位，第一帧报文用于拿到服务器的mac
-static int times = AUTH_8021X_RECV_TIMES; // 8021x断链重试次数
+static int times = 3; // 8021x断链重试次数，运行时由 EAPRetries 覆盖
 static int success_8021x = 0; // 8021x成功登录标志位
 static int isNeedHeartBeat = 0;  // 是否需要发送UDP心跳
 static uint8_t EthHeader[14] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -349,13 +344,13 @@ void printIfInfo() {
  */
 int loginToGetServerMAC(uint8_t recv_data[]) {
 	fd_set fdR;
-	struct timeval timeout = { AUTH_8021X_RECV_DELAY, 0 };
+	struct timeval timeout = { EAPTimeout, 0 };
 	struct timeval tmp_timeout = timeout;
 
 	send_8021x_data_len = appendStartPkt(MultcastHeader);
 	auth_8021x_Sender(send_8021x_data, send_8021x_data_len);
 	LogWrite(DOT1X, INF, "%s", "Client: Multcast Start.");
-	times = AUTH_8021X_RECV_TIMES;
+	times = EAPRetries;
 	while (resev == 0) {
 		FD_ZERO(&fdR);
 		FD_SET(auth_8021x_sock, &fdR);
@@ -373,7 +368,7 @@ int loginToGetServerMAC(uint8_t recv_data[]) {
 					//已经收到了
 					LogWrite(DOT1X, INF, "Received the first request.");
 					resev = 1;
-					times = AUTH_8021X_RECV_TIMES;
+					times = EAPRetries;
 					// 初始化服务器MAC地址
 					memcpy(EthHeader, recv_data + 6, 6);
 					if(auth_8021x_Handler(recv_data))
@@ -408,7 +403,7 @@ int loginToGetServerMAC(uint8_t recv_data[]) {
 }
 
 int Authentication(int client) {
-	struct timeval timeout = { AUTH_8021X_RECV_DELAY, 0 };
+	struct timeval timeout = { EAPTimeout, 0 };
 	struct timeval tmp_timeout = timeout;
 	int ret = 0;
 	fd_set fdR;
@@ -481,13 +476,13 @@ int Authentication(int client) {
 		}
 		// 如果8021x协议认证成功并且心跳时间间隔大于设定值,则发送一次心跳
 		if (success_8021x && isNeedHeartBeat) {
-			if ((lastHBDone == 0) && (time(NULL) - BaseHeartbeatTime > DRCOM_UDP_HEARTBEAT_TIMEOUT)) {
+			if ((lastHBDone == 0) && (time(NULL) - BaseHeartbeatTime > HBTimeout)) {
 				// 认为已经掉线
 				LogWrite(DRCOM, ERROR,	"Client: No response to last heartbeat.");
 				ret = 1; //重拨
 				break;
 			}
-			if (time(NULL) - BaseHeartbeatTime > DRCOM_UDP_HEARTBEAT_DELAY) {
+			if (time(NULL) - BaseHeartbeatTime > HBInterval) {
 				send_udp_data_len = Drcom_ALIVE_HEARTBEAT_TYPE_Setter( send_udp_data, recv_udp_data);
 				LogWrite(DRCOM, INF, "Client: Send alive heartbeat.");
 				if (auth_UDP_Sender(send_udp_data, send_udp_data_len) == 0) {
@@ -638,7 +633,7 @@ int auth_8021x_Handler(uint8_t recv_data[]) {
 		LogWrite(DOT1X, ERROR, "Server: Failure.");
 		if (times > 0) {
 			times--;
-			sleep(AUTH_8021X_RECV_DELAY);
+			sleep(EAPTimeout);
 			/* 主动发起认证会话 */
 			return 1;
 		} else {
@@ -647,12 +642,12 @@ int auth_8021x_Handler(uint8_t recv_data[]) {
 		}
 	} else if ((EAP_Code) recv_data[18] == SUCCESS) {
 		LogWrite(DOT1X, INF, "Server: Success.");
-		times = AUTH_8021X_RECV_TIMES;
+		times = EAPRetries;
 		success_8021x = 1;
 		send_udp_data_len = Drcom_MISC_START_ALIVE_Setter(send_udp_data,
 				recv_data);
 		// 一秒后才回复
-		sleep(AUTH_8021X_RECV_DELAY);
+		sleep(EAPTimeout);
 		if (OnlineHookCmd) {
 			system(OnlineHookCmd);
 		}

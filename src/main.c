@@ -22,6 +22,10 @@ static const struct option long_options[] = {
 	{"hash", required_argument, NULL, 'h'},
 	{"online-hook", required_argument, NULL, 'E'},
 	{"offline-hook", required_argument, NULL, 'Q'},
+	{"heartbeat-interval", required_argument, NULL, 1000},
+	{"heartbeat-timeout", required_argument, NULL, 1001},
+	{"eap-timeout", required_argument, NULL, 1002},
+	{"eap-retries", required_argument, NULL, 1003},
 	{"debug", optional_argument, NULL, 'D'},
 	{"logoff", no_argument, NULL, 'o'},
 	{NULL, no_argument, NULL, 0}
@@ -38,6 +42,10 @@ void PrintHelp(const char * argn) {
 		" -h, --hash <hash> DrAuthSvr.dll hash value.\n"
 		" -E, --online-hook <command> Command to be execute after EAP authentication success.\n"
 		" -Q, --offline-hook <command> Command to be execute when you are forced offline at nignt.\n"
+		"     --heartbeat-interval <sec> Dr.com UDP heartbeat interval. Default 12.\n"
+		"     --heartbeat-timeout <sec> Dr.com UDP heartbeat timeout. Default 2.\n"
+		"     --eap-timeout <sec> 802.1X receive timeout. Default 1.\n"
+		"     --eap-retries <times> 802.1X retry times. Default 3.\n"
 		" -D, --debug\n"
 		" -o, --logoff\n",
 		argn);
@@ -108,6 +116,18 @@ int main(int argc, char *argv[]) {
 		case 'h':
 			Hash = optarg;
 			break;
+		case 1000:
+			HBInterval = atoi(optarg);
+			break;
+		case 1001:
+			HBTimeout = atoi(optarg);
+			break;
+		case 1002:
+			EAPTimeout = atoi(optarg);
+			break;
+		case 1003:
+			EAPRetries = atoi(optarg);
+			break;
 		case 'D':
 			if (optarg) {
 				tmpdbg = atoi(optarg);
@@ -141,6 +161,14 @@ int main(int argc, char *argv[]) {
 		inet_aton(SERVER_ADDR, &udpserver_ipaddr);
 	if (dns_ipaddr.s_addr == 0)
 		inet_aton(DNS_ADDR, &dns_ipaddr);
+
+	if (HBInterval < 1 || HBInterval > 3600 ||
+			HBTimeout < 1 || HBTimeout > 3600 ||
+			EAPTimeout < 1 || EAPTimeout > 3600 ||
+			EAPRetries < 1 || EAPRetries > 100) {
+		LogWrite(INIT, ERROR, "Heartbeat/EAP parameters out of range!");
+		exit(-1);
+	}
 
 	/* 配置退出登录的signal handler */
 	sa_term.sa_handler = &handle_term;
